@@ -47,3 +47,6 @@ Temporary Items
 .apdisk
 *.pyc
 *.pdf
+
+# Avoid accidentally committing and pushing passwords to a public repo
+arduino/ws2812_controller/network_conf.h

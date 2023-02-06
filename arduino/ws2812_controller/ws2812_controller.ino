@@ -4,6 +4,7 @@
 * Codebase created by ScottLawsonBC - https://github.com/scottlawsonbc
 */
 #include <NeoPixelBus.h>
+#include "network_conf.h" // password file
 
 #if defined(ESP8266)
 #include <ESP8266WiFi.h>
@@ -24,10 +25,6 @@
 //NeoPixelBus settings
 const uint8_t PixelPin = 3;  // make sure to set this to the correct pin, ignored for Esp8266(set to 3 by default for DMA)
 
-// Wifi and socket settings
-const char* ssid     = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
-unsigned int localPort = 7777;
 char packetBuffer[BUFFER_LEN];
 
 uint8_t N = 0;
