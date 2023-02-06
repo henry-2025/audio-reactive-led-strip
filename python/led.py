@@ -16,6 +16,11 @@ elif config.DEVICE == 'pi':
                                        config.LED_FREQ_HZ, config.LED_DMA,
                                        config.LED_INVERT, config.BRIGHTNESS)
     strip.begin()
+# Device controls arduino over uart
+elif config.DEVICE == 'arduino':
+    import serial, struct, time
+    port = serial.Serial(config.PORT, 115200)
+
 elif config.DEVICE == 'blinkstick':
     from blinkstick import blinkstick
     import signal
@@ -109,6 +114,20 @@ def _update_pi():
     _prev_pixels = np.copy(p)
     strip.show()
 
+def _update_arduino():
+    """Writes new LED values to the serial port to which the arduino is connected. 
+
+    We do this with a strict order to reduce the pixel information size to
+    there bytes. """
+    global pixels
+    # Truncate values and cast to integer
+    pixels = np.clip(pixels, 0, 255).astype(int)
+    # Optional gamma correction
+    p = _gamma[pixels] if config.SOFTWARE_GAMMA_CORRECTION else np.copy(pixels)
+    # Encode 24-bit LED values in 32 bit integers
+    frame = struct.pack(f'<{config.N_PIXELS*3}B', *p.T.flatten())
+    port.write(frame)
+
 def _update_blinkstick():
     """Writes new LED values to the Blinkstick.
         This function updates the LED strip with new values.
@@ -142,6 +161,8 @@ def update():
         _update_esp8266()
     elif config.DEVICE == 'pi':
         _update_pi()
+    elif config.DEVICE == 'arduino':
+        _update_arduino()
     elif config.DEVICE == 'blinkstick':
         _update_blinkstick()
     else:
