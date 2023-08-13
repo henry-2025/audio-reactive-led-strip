@@ -40,22 +40,13 @@ NeoPixelBus<NeoGrbFeature, Neo800KbpsMethod> ledstrip(NUM_LEDS, PixelPin);
 
 void setup() {
     Serial.begin(115200);
-    WiFi.mode(WIFI_STA);
-    WiFi.config(ip, gateway, subnet);
-    WiFi.begin(ssid, password);
-    Serial.println("");
-    // Connect to wifi and print the IP address over serial
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    
-    Serial.println("");
-    Serial.print("Connected to ");
-    Serial.println(ssid);
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
-    
+
+    Serial.println(WiFi.softAPConfig(ip, gateway, subnet) ? "Ready" : "Failed!");
+    Serial.print("Setting soft-AP ... ");
+    Serial.println(WiFi.softAP(ssid, password) ? "Ready" : "Failed!");
+    Serial.print("Soft-AP IP address = ");
+    Serial.println(WiFi.softAPIP());
+
     port.begin(localPort);
     
     ledstrip.Begin();//Begin output

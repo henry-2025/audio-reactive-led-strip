@@ -3,6 +3,7 @@ from __future__ import division
 import time
 import numpy as np
 from pyqtgraph.Qt import QtGui
+from PyQt5 import QtWidgets
 import pyqtgraph as pg
 from pyqtgraph.dockarea import *
 
@@ -13,8 +14,8 @@ class GUI:
 
     def __init__(self, width=800, height=450, title=''):
         # Create GUI window
-        self.app = QtGui.QApplication([])
-        self.win = pg.GraphicsWindow(title)
+        self.app = QtWidgets.QApplication([])
+        self.win = pg.GraphicsLayoutWidget(title=title)
         self.win.resize(width, height)
         self.win.setWindowTitle(title)
         # Create GUI layout
