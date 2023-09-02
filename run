@@ -1,5 +1,0 @@
-if ! conda env list | grep audio-reactive-led-strip > /dev/null 2>&1 ; then
-	conda env create -f environment.yml
-fi
-
-conda run -n audio-reactive-led-strip python3 python/visualization.py
