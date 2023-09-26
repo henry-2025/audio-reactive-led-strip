@@ -6,24 +6,14 @@
 // compiling with: g++ gl_draw_area.cpp `pkg-config --cflags gtk+-3.0`
 // \ `pkg-config --libs gtk+-3.0` -lepoxy
 
-#include <epoxy/gl.h>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
+#include <GL/glew.h>
 #include <gtk/gtk.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
-#include <iostream>
-
 unsigned int WIDTH = 800;
 unsigned int HEIGHT = 600;
-
-using glm::lookAt;
-using glm::mat4;
-using glm::perspective;
-using glm::rotate;
-using glm::vec3;
 
 const GLchar *VERTEX_SOURCE =
     "#version 330\n"
@@ -97,8 +87,6 @@ int dt = 0;
 static GLuint position_buffer;
 static GLuint program;
 static GLuint vao;
-
-mat4 model = mat4(1.0);
 
 /* Create and compile a shader */
 static GLuint create_shader(int type) {
@@ -222,20 +210,6 @@ static void draw_box(long delta_time) {
   /* Use our shaders */
   glUseProgram(program);
 
-  model = rotate(model, (float)delta_time / 1000, vec3(1, 1, 0));
-  glUniformMatrix4fv(glGetUniformLocation(program, "model"), 1, GL_FALSE,
-                     &model[0][0]);
-  vec3 position = vec3(0, 0, 5);
-  vec3 front = vec3(0, 0, -1);
-  vec3 up = vec3(0, 1, 0);
-  mat4 view = lookAt(position, position + front, up);
-  glUniformMatrix4fv(glGetUniformLocation(program, "view"), 1, GL_FALSE,
-                     &view[0][0]);
-  mat4 projection =
-      perspective(45.0, double(WIDTH) / double(HEIGHT), 0.1, 100.0);
-  glUniformMatrix4fv(glGetUniformLocation(program, "projection"), 1, GL_FALSE,
-                     &projection[0][0]);
-
   glBindVertexArray(vao);
   /* Use the vertices in our buffer */
 
@@ -281,13 +255,10 @@ int main(int argc, char **argv) {
   window = gtk_window_new();
   gtk_window_set_default_size(GTK_WINDOW(window), WIDTH, HEIGHT);
   gtk_window_set_title(GTK_WINDOW(window), "GL Area");
-  gtk_container_set_border_width(GTK_CONTAINER(window), 10);
   box = gtk_box_new(GTK_ORIENTATION_VERTICAL, FALSE);
   g_object_set(box, "margin", 12, NULL);
   gtk_box_set_spacing(GTK_BOX(box), 6);
-  gtk_container_add(GTK_CONTAINER(window), box);
   gl_area = gtk_gl_area_new();
-  gtk_box_pack_start(GTK_BOX(box), gl_area, 1, 1, 0);
   /* We need to initialize and free GL resources, so we use
    * the realize and unrealize signals on the widget
    */
@@ -297,8 +268,6 @@ int main(int argc, char **argv) {
   /* The main "draw" call for GtkGLArea */
   g_signal_connect(gl_area, "render", G_CALLBACK(render), NULL);
   /* Quit form main if got delete event */
-  g_signal_connect(G_OBJECT(window), "delete-event", G_CALLBACK(gtk_main_quit),
-                   NULL);
   gtk_window_present(GTK_WINDOW(window));
 
   return 0;
