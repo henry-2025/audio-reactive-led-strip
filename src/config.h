@@ -11,6 +11,8 @@
 #define N_PIXELS 255 // TODO: this should be something that we define in the config
 #define DEV_IP "192.168.0.150"
 #define DEV_PORT 7777
+#define FPS 60
+#define MIC_RATE 44100
 
 struct config {
   uint freq_min;

@@ -5,17 +5,18 @@ project(audio-reactive-led-strip LANGUAGES C)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk4)
 pkg_check_modules(FFTW REQUIRED IMPORTED_TARGET fftw3f)
+pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse-simple)
 find_package(GLEW REQUIRED)
 set(OpenGL_GL_PREFERENCE GLVND)
 find_package(OpenGL REQUIRED)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 set(CMAKE_C_COMPILER clang)
-include_directories(${GTK_INCLUDE_DIRS} ${GLEW_INCLUDE_DIRS} ${FFTW_INCLUDE_DIRS})
+include_directories(${GTK_INCLUDE_DIRS} ${GLEW_INCLUDE_DIRS} ${FFTW_INCLUDE_DIRS} ${PULSE_INCLUDE_DIRS})
 
 # main executable
 add_executable(reactive main.c)
-target_link_libraries(reactive PRIVATE ${GLEW_LIBRARIES} ${OPENGL_LIBRARIES} m PkgConfig::GTK PkgConfig::FFTW)
+target_link_libraries(reactive PRIVATE ${GLEW_LIBRARIES} ${OPENGL_LIBRARIES} m PkgConfig::GTK PkgConfig::FFTW PkgConfig::PULSE)
 
 enable_testing()
 # dsp tests
@@ -26,3 +27,8 @@ add_test(NAME TestMelBank COMMAND test_mel_bank)
 # led network tests
 add_executable(test_led test_led.c led.c led.h config.h gamma_table.c gamma_table.h)
 add_test(NAME TestLED COMMAND test_led)
+
+# audio tests
+add_executable(test_audio test_audio.c audio.c audio.h config.h)
+target_link_libraries(test_audio PRIVATE PkgConfig::PULSE)
+add_test(NAME TestAudio COMMAND test_audio)
