@@ -11,8 +11,6 @@ void print_buffer(float buffer[MIC_RATE / FPS]) {
   // FPS - 1]);
 }
 
-bool should_close;
-
 int main() {
   pthread_t thread_id;
 
@@ -20,7 +18,6 @@ int main() {
 
   sleep(10);
 
-  should_close = true;
   pthread_join(thread_id, NULL);
   return 0;
 }
