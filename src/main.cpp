@@ -6,9 +6,7 @@
 // compiling with: g++ gl_draw_area.cpp `pkg-config --cflags gtk+-3.0`
 // \ `pkg-config --libs gtk+-3.0` -lepoxy
 
-#include <gl/glew.h>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
+#include <GL/glew.h>
 #include <gtk/gtk.h>
 #include <math.h>
 #include <stdio.h>
@@ -18,12 +16,6 @@
 
 unsigned int WIDTH = 800;
 unsigned int HEIGHT = 600;
-
-using glm::lookAt;
-using glm::mat4;
-using glm::perspective;
-using glm::rotate;
-using glm::vec3;
 
 const GLchar *VERTEX_SOURCE =
     "#version 330\n"
@@ -98,7 +90,6 @@ static GLuint position_buffer;
 static GLuint program;
 static GLuint vao;
 
-mat4 model = mat4(1.0);
 
 /* Create and compile a shader */
 static GLuint create_shader(int type) {
@@ -139,12 +130,6 @@ static void realize(GtkWidget *widget) {
   if (gtk_gl_area_get_error(GTK_GL_AREA(widget)) != NULL)
     return;
   context = gtk_gl_area_get_context(GTK_GL_AREA(widget));
-
-  GLenum glew_error = glewInit();
-  if (glew_error != GLEW_OK) {
-    g_print("Unable to initialize glew %s\n", glewGetErrorString(glew_error));
-    exit(1);
-  }
 
   /* We only use one VAO, so we always keep it bound */
   glGenVertexArrays(1, &vao);
@@ -230,19 +215,6 @@ static void draw_box(long delta_time) {
   /* Use our shaders */
   glUseProgram(program);
 
-  model = rotate(model, (float)delta_time / 1000, vec3(1, 1, 0));
-  glUniformMatrix4fv(glGetUniformLocation(program, "model"), 1, GL_FALSE,
-                     &model[0][0]);
-  vec3 position = vec3(0, 0, 5);
-  vec3 front = vec3(0, 0, -1);
-  vec3 up = vec3(0, 1, 0);
-  mat4 view = lookAt(position, position + front, up);
-  glUniformMatrix4fv(glGetUniformLocation(program, "view"), 1, GL_FALSE,
-                     &view[0][0]);
-  mat4 projection =
-      perspective(45.0, double(WIDTH) / double(HEIGHT), 0.1, 100.0);
-  glUniformMatrix4fv(glGetUniformLocation(program, "projection"), 1, GL_FALSE,
-                     &projection[0][0]);
 
   glBindVertexArray(vao);
   /* Use the vertices in our buffer */

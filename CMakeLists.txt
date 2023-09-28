@@ -12,4 +12,6 @@ enable_testing()
 add_test(NAME TestMelBank COMMAND test_mel_bank)
 add_test(NAME TestLED COMMAND test_led)
 add_test(NAME TestAudio COMMAND test_audio)
+add_test(NAME TestExpFilter COMMAND test_exp_filter)
+add_test(NAME TestFFT COMMAND test_fft)
 

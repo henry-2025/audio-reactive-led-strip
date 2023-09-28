@@ -13,8 +13,17 @@ float exp_filter_single(float current_val, float new_val, float alpha_decay,
 void exp_filter_array(size_t size, float *current_val, float *new_val,
                       float alpha_decay, float alpha_rise);
 
-fftwf_plan create_rfft_plan(size_t size, float *input, float *output);
-fftwf_plan create_fft_plan(size_t size, float *input, fftwf_complex *output);
+typedef struct {
+  fftwf_plan p;
+  float *in;
+  fftwf_complex *inter;
+  float *out;
+  size_t fft_size;
+} rfft;
+
+rfft new_rfft(size_t fft_size);
+void run_rfft(rfft c);
+void destroy_rfft(rfft c);
 
 inline float hertz_to_melf(float freq) {
   return 2595.0 * log10f(1 + (freq / 700.0));

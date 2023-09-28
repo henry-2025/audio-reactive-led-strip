@@ -6,27 +6,56 @@
 extern float hertz_to_melf(float freq);
 extern float mel_to_hertzf(float mel);
 
+/**
+ * Single exponential filter value. Returns the new value to the stack
+ */
 float exp_filter_single(float current_val, float new_val, float alpha_decay,
                         float alpha_rise) {
   float alpha = new_val > current_val ? alpha_rise : alpha_decay;
   return alpha * new_val + (1.0 - alpha) * current_val;
 }
 
+/**
+ * Exponential filter on an array. Modifies current\_val in-place with the
+ * updated new\_val
+ */
 void exp_filter_array(size_t size, float *current_val, float *new_val,
                       float alpha_decay, float alpha_rise) {
   for (size_t i = 0; i < size; i++) {
     float alpha = new_val[i] - current_val[i] > 0.0 ? alpha_rise : alpha_decay;
-    new_val[i] = alpha * current_val[i] + (1.0 - alpha) * current_val[i];
+    current_val[i] = alpha * new_val[i] + (1.0 - alpha) * current_val[i];
   }
 }
 
-fftwf_plan create_rfft_plan(size_t size, float *input, float *output) {
-  return fftwf_plan_r2r_1d(size, input, output, FFTW_REDFT10,
-                           FFTW_DESTROY_INPUT);
+/**
+ * Executes the rfft in-place, yielding the absolute value of the coefficients
+ */
+
+rfft new_rfft(size_t fft_size) {
+  float *in = (float *)fftwf_malloc(fft_size * sizeof(float));
+  fftwf_complex *inter =
+      (fftwf_complex *)fftwf_malloc(fft_size * sizeof(fftwf_complex));
+  float *out = (float *)fftwf_malloc((fft_size * sizeof(float)) / 2);
+
+  fftwf_plan plan = fftwf_plan_dft_r2c_1d(fft_size, in, inter, FFTW_MEASURE);
+
+  rfft a = {
+      .p = plan, .in = in, .inter = inter, .out = out, .fft_size = fft_size};
+  return a;
 }
 
-fftwf_plan create_fft_plan(size_t size, float *input, fftwf_complex *output) {
-  return fftwf_plan_dft_r2c_1d(size, input, output, FFTW_DESTROY_INPUT);
+void run_rfft(rfft c) {
+  fftwf_execute(c.p);
+  for (int i = 0; i < c.fft_size / 2; i++) {
+    c.out[i] = sqrtf(powf(c.inter[i][0], 2) + powf(c.inter[i][1], 2));
+  }
+}
+
+void destroy_rfft(rfft c) {
+  fftwf_free(c.in);
+  fftwf_free(c.out);
+  fftwf_free(c.inter);
+  fftwf_destroy_plan(c.p);
 }
 
 void melfrequencies_mel_filterbank(float freq_min, float freq_max,
@@ -82,7 +111,8 @@ void compute_melmat(uint freq_min, uint freq_max, uint sample_rate,
 }
 
 void create_mel_bank(size_t size, float mel_y[NUM_BANDS][N_FFT_BANDS],
-                     float mel_x[N_FFT_BANDS], int *samples, struct config cfg) {
+                     float mel_x[N_FFT_BANDS], int *samples,
+                     struct config cfg) {
   *samples = (int)(cfg.mic_rate * cfg.n_rolling_history / (2.0 * cfg.fps));
   compute_melmat(cfg.freq_min, cfg.freq_max, cfg.sample_rate, mel_y, mel_x);
 }

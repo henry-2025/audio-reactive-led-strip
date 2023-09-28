@@ -8,6 +8,7 @@
 #define NUM_BANDS 10
 #define N_FFT_BANDS 24
 #define N_FFT_BINS 24
+#define FFT_SIZE 1024
 #define N_PIXELS 255 // TODO: this should be something that we define in the config
 #define DEV_IP "192.168.0.150"
 #define DEV_PORT 7777
