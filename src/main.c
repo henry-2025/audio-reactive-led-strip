@@ -1,5 +1,9 @@
-#include "gui.h"
+#include <gtk/gtk.h>
 
-int main(int argc, char **argv) {
-    return run_app(argc, argv);
+#include "reactive_app.h"
+
+int
+main (int argc, char *argv[])
+{
+  return g_application_run (G_APPLICATION (reactive_app_new ()), argc, argv);
 }
