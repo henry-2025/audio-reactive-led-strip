@@ -7,17 +7,17 @@
 #include <math.h>
 #include <stdlib.h>
 
-float exp_filter_single(float current_val, float new_val, float alpha_decay,
-                        float alpha_rise);
+double exp_filter_single(double current_val, double new_val, double alpha_decay,
+                        double alpha_rise);
 
-void exp_filter_array(size_t size, float *current_val, float *new_val,
-                      float alpha_decay, float alpha_rise);
+void exp_filter_array(size_t size, double *current_val, double *new_val,
+                      double alpha_decay, double alpha_rise);
 
 typedef struct {
-  fftwf_plan p;
-  float *in;
-  fftwf_complex *inter;
-  float *out;
+  fftw_plan p;
+  double *in;
+  fftw_complex *inter;
+  double *out;
   size_t fft_size;
 } rfft;
 
@@ -25,21 +25,28 @@ rfft new_rfft(size_t fft_size);
 void run_rfft(rfft c);
 void destroy_rfft(rfft c);
 
-inline float hertz_to_melf(float freq) {
-  return 2595.0 * log10f(1 + (freq / 700.0));
+inline double hertz_to_mel(double freq) {
+  return 2595.0 * log10(1 + (freq / 700.0));
 }
-inline float mel_to_hertzf(float mel) {
-  return 700.0 * powf(10, mel / 2595.0) - 700;
+inline double mel_to_hertz(double mel) {
+  return 700.0 * pow(10, mel / 2595.0) - 700;
 }
-void melfrequencies_mel_filterbank(float freq_min, float freq_max,
-                                   float *frequencies_mel,
-                                   float *lower_edges_mel,
-                                   float *upper_edges_mel,
-                                   float *center_frequencies_mel);
-void compute_melmat(uint freq_min, uint freq_max, uint sample_rate,
-                    float melmat[NUM_BANDS][N_FFT_BANDS],
-                    float freqs[N_FFT_BANDS]);
+double *melfrequencies_mel_filterbank(size_t num_mel_bands, double freq_min,
+                                     double freq_max, size_t n_fft_bands);
 
-void create_mel_bank(size_t size, float mel_y[NUM_BANDS][N_FFT_BANDS],
-                     float mel_x[N_FFT_BANDS], int *samples, struct config cfg);
+/**
+ * A transformation matrix for mel spectrum
+ * mel\_y: the transformation matrix
+ * mel\_x: the center frequencies of the mel bands
+ */
+typedef struct {
+  double *mel_x;
+  double *mel_y;
+} mel_bank;
+
+mel_bank create_mel_bank(size_t mic_rate, size_t n_rolling_history,
+                         size_t fps, size_t n_fft_bins, size_t min_freq,
+                         size_t max_freq);
+
+void destroy_mel_bank(mel_bank b);
 #endif

@@ -1,6 +1,6 @@
 #ifndef GUI_H
 #define GUI_H
 
-void create_gui();
+int run_app(int argc, char **argv);
 
 #endif

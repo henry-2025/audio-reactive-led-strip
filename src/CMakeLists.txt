@@ -1,6 +1,6 @@
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk4)
-pkg_check_modules(FFTW REQUIRED IMPORTED_TARGET fftw3f)
+pkg_check_modules(FFTW REQUIRED IMPORTED_TARGET fftw3)
 pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse-simple)
 find_package(GLEW REQUIRED)
 set(OpenGL_GL_PREFERENCE GLVND)

@@ -15,6 +15,9 @@
 #define FPS 60
 #define MIC_RATE 44100
 
+#define WINDOW_HEIGHT 600
+#define WINDOW_WIDTH 800
+
 struct config {
   uint freq_min;
   uint freq_max;
