@@ -1,17 +1,17 @@
 use std::{sync::Arc, usize};
 
-use ndarray::{Array1, s};
+use ndarray::{s, Array, Array1, Array2};
 use rustfft::{
-    num_complex::{Complex, Complex64},
+    num_complex::{Complex64, ComplexFloat},
     Fft, FftPlanner,
 };
 
-fn hertz_to_mel(mel: f64) -> f64 {
-    return 2595.0 * (1.0 + (mel / 700.0)).log10();
+fn hertz_to_mel(hertz: f64) -> f64 {
+    2595.0 * (1.0 + (hertz / 700.0)).log10()
 }
 
 fn mel_to_hertz(mel: f64) -> f64 {
-    return 700.0 * (mel / 2595.0).powi(10) - 700.0;
+    700.0 * (10.0.powf(mel / 2595.0)) - 700.0
 }
 
 /**
@@ -23,7 +23,7 @@ fn exp_filter_single(current_val: f64, new_val: f64, alpha_decay: f64, alpha_ris
     } else {
         alpha_decay
     };
-    return alpha * new_val + (1.0 - alpha) * current_val;
+    alpha * new_val + (1.0 - alpha) * current_val
 }
 
 fn exp_filter_array(
@@ -47,11 +47,11 @@ fn exp_filter_array(
         .collect()
 }
 
-fn new_rfft(fft_size: usize) -> Arc<dyn Fft<f64>> {
+pub fn new_rfft(fft_size: usize) -> Arc<dyn Fft<f64>> {
     FftPlanner::new().plan_fft_forward(fft_size)
 }
 
-fn exec_fft(buffer: &Array1<f64>, fft: Arc<dyn Fft<f64>>) -> Array1<f64> {
+pub fn exec_rfft(buffer: &Array1<f64>, fft: &Arc<dyn Fft<f64>>) -> Array1<f64> {
     let mut complex_buffer: Array1<Complex64> =
         buffer.iter().map(|x| Complex64::new(*x, 0.0)).collect();
 
@@ -61,10 +61,10 @@ fn exec_fft(buffer: &Array1<f64>, fft: Arc<dyn Fft<f64>>) -> Array1<f64> {
         .iter()
         .enumerate()
         .filter_map(|(i, x)| {
-            if i < buffer.len() / 2 {
-                None
+            if i <= buffer.len() / 2 {
+                Some(x.abs())
             } else {
-                Some(x.re)
+                None
             }
         })
         .collect()
@@ -75,9 +75,9 @@ fn exec_fft(buffer: &Array1<f64>, fft: Arc<dyn Fft<f64>>) -> Array1<f64> {
  * mel\_y: the transformation matrix
  * mel\_x: the center frequencies of the mel bands
  */
-struct MelBank {
+pub struct MelBank {
     x: Array1<f64>,
-    y: Array1<f64>,
+    y: Array2<f64>,
 }
 
 /**
@@ -90,59 +90,55 @@ pub fn create_mel_bank(
     n_rolling_history: u32,
     fps: u32,
     n_fft_bins: u32,
-    min_freq: u32,
-    max_freq: u32,
+    min_freq_hz: u32,
+    max_freq_hz: u32,
 ) -> MelBank {
-    let sample_rate = (mic_rate * n_rolling_history) as f64 / (2.0 * fps as f64);
-    let n_mel_bands = ( ( mic_rate * n_rolling_history ) as f64 / (2.0 * fps as f64) ) as i32;
+    let num_fft_bands = (mic_rate * n_rolling_history) as f64 / (2.0 * fps as f64);
+    let num_mel_bands = n_fft_bins as usize; // bands and bins are different quantities
 
-    let mel_max = hertz_to_mel(max_freq as f64);
-    let mel_min= hertz_to_mel(min_freq as f64);
-    let delta_mel =(mel_max - mel_min).abs() / (n_mel_bands as f64 + 1.0);
-    let frequencies_mel = Array1::from_iter((0..n_mel_bands + 2).map(|i| {
-        i as f64 * delta_mel + mel_min
-    }));
+    // generate centerfrequencies and band eges for a mel filter bank
+    let max_freq_mel = hertz_to_mel(max_freq_hz as f64);
+    let min_freq_mel = hertz_to_mel(min_freq_hz as f64);
+    let delta_mel = (max_freq_mel - min_freq_mel).abs() / (num_mel_bands as f64 + 1.0);
+    let frequencies_mel =
+        Array1::from_iter((0..num_mel_bands + 2).map(|i| i as f64)) * delta_mel + min_freq_mel;
+    let frequencies_hz = frequencies_mel.map(|mel| mel_to_hertz(*mel));
 
-    let lower_edges_mel = frequencies_mel.slice(s![..n_mel_bands]);
-    let center_frequencies_mel = frequencies_mel.slice(s![1..n_mel_bands + 1]);
-    let upper_edges_mel = frequencies_mel.slice(s![2..]);
-
-    let step = sample_rate / 2.0 / (n_fft_bins - 1) as f64;
-    let mel_x = ndarray::Array1::linspace(0., n_fft_bins as f64 *step, n_fft_bins as usize);
-    let mut mel_y = ndarray::Array2::new(n_fft_bins, n_mel_bands);
-
-
-    for i in 0..n_mel_bands {
-        let lower = lower_edges_mel[i];
-        let center = center_frequencies_mel[i];
-        let upper = upper_edges_mel[i];
-
-        for j in 0..n_fft_bands {
-      if ((mel_x[j] >= lower) == (mel_x[j] <= center)) {
-        mel_y[i * n_fft_bands + j] = (mel_x[j] - lower) / (center - lower);
-      }
-      if ((mel_x[j] >= center) == (mel_x[j] <= upper)) {
-        mel_y[i * n_fft_bands + j] = (upper - mel_x[j]) / (upper - center);
-            
+    // build the mel input scale and transformation matrix
+    let mel_x = ndarray::Array1::linspace(0., mic_rate as f64 / 2.0, num_fft_bands as usize);
+    let mel_y = Array2::from_shape_fn((num_mel_bands, num_fft_bands as usize), |(i, j)| {
+        let (lower, center, upper) = (
+            frequencies_hz[i],
+            frequencies_hz[i + 1],
+            frequencies_hz[i + 2],
+        );
+        if (mel_x[j] >= lower) == (mel_x[j] <= center) {
+            (mel_x[j] - lower) / (center - lower)
+        } else if (mel_x[j] >= center) == (mel_x[j] <= upper) {
+            (upper - mel_x[j]) / (upper - center)
+        } else {
+            0.0
         }
-    }
+    });
 
-
-
-    lower_edges_mel = melfrequencies
-
-
-    MelBank {
-        x: Array1::new(1024),
-        y: 
-    }
+    MelBank { x: mel_x, y: mel_y }
 }
 
 #[cfg(test)]
 mod test {
+    use std::fs::File;
+
+    use approx::assert_abs_diff_eq;
     use ndarray::arr1;
+    use ndarray_npy::NpzReader;
 
     use super::*;
+
+    #[test]
+    fn test_mel_hz_conversion() {
+        assert_abs_diff_eq!(mel_to_hertz(100.0), 64.95112114434983);
+        assert_abs_diff_eq!(hertz_to_mel(100.0), 150.48910240709708);
+    }
 
     #[test]
     fn test_exp_filter() {
@@ -304,410 +300,63 @@ mod test {
     }
 
     #[test]
-    fn test_exec_fft_inplace() {
-        let fft = new_rfft(1024);
-
+    fn test_rfft() {
         let input = arr1(&[
-            1.48094528,
-            0.59696835,
-            -0.95853714,
-            2.06560912,
-            -0.48211678,
-            2.65378565,
-            -1.63017596,
-            -1.7736234,
-            -0.18237599,
-            0.78558729,
-            1.92762221,
-            -0.11180059,
-            -0.37506153,
-            1.76112525,
-            0.86316855,
-            -0.64965065,
-            -0.62537752,
-            -1.20447363,
-            -2.01692314,
-            0.10712862,
-            1.17423722,
-            -0.62542565,
-            1.16431726,
-            -0.6035666,
-            -0.17092301,
-            2.22440035,
-            0.69971944,
-            -0.23871011,
-            -0.75631096,
-            0.18585501,
-            0.48200846,
-            1.03091996,
-            0.3238756,
-            0.76963387,
-            -0.22378036,
-            -0.0591962,
-            0.0908271,
-            -0.36701689,
-            -0.92282657,
-            -0.44215906,
-            -0.87652361,
-            0.26975025,
-            1.0402947,
-            0.09392486,
-            -0.45810233,
-            -1.75546854,
-            -0.11624388,
-            -0.01373014,
-            0.26311115,
-            0.8972705,
-            0.72080431,
-            0.29768675,
-            -0.49910996,
-            0.26488135,
-            0.21259605,
-            0.28471469,
-            -0.47448167,
-            -1.5913399,
-            0.90448678,
-            -0.66089208,
-            0.12687497,
-            -1.12807841,
-            0.72215092,
-            -0.37211337,
-            0.43200432,
-            0.25162815,
-            0.25028231,
-            -1.1038772,
-            -0.39124264,
-            -0.51855742,
-            0.52418886,
-            0.35077276,
-            -0.33244553,
-            -0.41294771,
-            -0.32350463,
-            -0.00789725,
-            -0.86683017,
-            -0.42526519,
-            -1.71192727,
-            0.18745107,
-            0.02441095,
-            0.14731432,
-            -1.22928049,
-            0.66580587,
-            -0.99368776,
-            -1.20580196,
-            -0.17206011,
-            0.29488154,
-            1.52847238,
-            0.33654293,
-            -0.25829216,
-            -0.41296341,
-            -0.63304026,
-            0.40210274,
-            0.92177561,
-            -1.89623355,
-            -0.70084883,
-            1.17562188,
-            -0.69704496,
-            -0.01975832,
-            0.27325999,
-            1.24249352,
-            0.95413082,
-            0.89987305,
-            -0.79308366,
-            0.86759218,
-            0.78226561,
-            0.01063997,
-            -0.3325533,
-            0.20462194,
-            0.78163695,
-            -0.90694826,
-            -0.14670344,
-            -1.55923589,
-            0.88154475,
-            -0.31585416,
-            0.53328458,
-            0.19075993,
-            -0.31190746,
-            1.40099541,
-            0.59151294,
-            -0.68778615,
-            -0.46705669,
-            -0.6522581,
-            0.32920506,
-            0.15964008,
-            0.53220806,
-            -0.82599626,
+            -0.50168074,
+            -1.36283763,
+            2.08719592,
+            0.56672292,
+            -0.9343916,
+            -0.27035682,
+            -0.55382359,
+            0.62773806,
+            0.56436091,
+            -0.57617775,
+            2.6793696,
+            0.53109647,
+            1.1987642,
+            -0.67969233,
+            -0.22888863,
+            -0.69824528,
         ]);
         let expected = arr1(&[
-            0.93619659,
-            12.07992828,
-            4.62251223,
-            5.32819342,
-            7.58289659,
-            8.5404077,
-            7.11749831,
-            12.40593877,
-            5.7864796,
-            3.62987399,
-            13.4648943,
-            8.12444372,
-            10.95093531,
-            18.45956652,
-            4.74087849,
-            6.01085309,
-            3.56161329,
-            16.17553834,
-            2.48966423,
-            3.36533988,
-            8.56811354,
-            4.10135118,
-            8.28576614,
-            24.05581369,
-            9.50480157,
-            7.09236442,
-            10.27192606,
-            3.0066255,
-            15.08569502,
-            18.37175771,
-            12.24048181,
-            11.07806431,
-            9.59349492,
-            7.24682706,
-            2.60169519,
-            7.02964612,
-            6.45974591,
-            1.82847498,
-            9.18781832,
-            1.26217906,
-            13.4251645,
-            7.15893595,
-            5.61697548,
-            7.80729343,
-            4.20309911,
-            12.49600029,
-            18.08385135,
-            7.20190626,
-            6.13260927,
-            7.91904732,
-            2.85813122,
-            7.13626733,
-            7.17952119,
-            14.43491241,
-            17.27436244,
-            7.49754677,
-            11.34455882,
-            5.11730567,
-            6.46300368,
-            16.18436041,
-            10.91069978,
-            10.07467636,
-            10.88957515,
-            4.50117537,
-            0.12250971,
+            2.44915373, 3.98812057, 5.93305473, 2.25434631, 5.35818967, 1.22848397, 5.58169067,
+            3.50134391, 6.17265841,
         ]);
 
         let input2 = arr1(&[
-            1.48094528,
-            0.59696835,
-            -0.95853714,
-            2.06560912,
-            -0.48211678,
-            2.65378565,
-            -1.63017596,
-            -1.7736234,
-            -0.18237599,
-            0.78558729,
-            1.92762221,
-            -0.11180059,
-            -0.37506153,
-            1.76112525,
-            0.86316855,
-            -0.64965065,
-            -0.62537752,
-            -1.20447363,
-            -2.01692314,
-            0.10712862,
-            1.17423722,
-            -0.62542565,
-            1.16431726,
-            -0.6035666,
-            -0.17092301,
-            2.22440035,
-            0.69971944,
-            -0.23871011,
-            -0.75631096,
-            0.18585501,
-            0.48200846,
-            1.03091996,
-            0.3238756,
-            0.76963387,
-            -0.22378036,
-            -0.0591962,
-            0.0908271,
-            -0.36701689,
-            -0.92282657,
-            -0.44215906,
-            -0.87652361,
-            0.26975025,
-            1.0402947,
-            0.09392486,
-            -0.45810233,
-            -1.75546854,
-            -0.11624388,
-            -0.01373014,
-            0.26311115,
-            0.8972705,
-            0.72080431,
-            0.29768675,
-            -0.49910996,
-            0.26488135,
-            0.21259605,
-            0.28471469,
-            -0.47448167,
-            -1.5913399,
-            0.90448678,
-            -0.66089208,
-            0.12687497,
-            -1.12807841,
-            0.72215092,
-            -0.37211337,
-            0.43200432,
-            0.25162815,
-            0.25028231,
-            -1.1038772,
-            -0.39124264,
-            -0.51855742,
-            0.52418886,
-            0.35077276,
-            -0.33244553,
-            -0.41294771,
-            -0.32350463,
-            -0.00789725,
-            -0.86683017,
-            -0.42526519,
-            -1.71192727,
-            0.18745107,
-            0.02441095,
-            0.14731432,
-            -1.22928049,
-            0.66580587,
-            -0.99368776,
-            -1.20580196,
-            -0.17206011,
-            0.29488154,
-            1.52847238,
-            0.33654293,
-            -0.25829216,
-            -0.41296341,
-            -0.63304026,
-            0.40210274,
-            0.92177561,
-            -1.89623355,
-            -0.70084883,
-            1.17562188,
-            -0.69704496,
-            -0.01975832,
-            0.27325999,
-            1.24249352,
-            0.95413082,
-            0.89987305,
-            -0.79308366,
-            0.86759218,
-            0.78226561,
-            0.01063997,
-            -0.3325533,
-            0.20462194,
-            0.78163695,
-            -0.90694826,
-            -0.14670344,
-            -1.55923589,
-            0.88154475,
-            -0.31585416,
-            0.53328458,
-            0.19075993,
-            -0.31190746,
-            1.40099541,
-            0.59151294,
-            -0.68778615,
-            -0.46705669,
-            -0.6522581,
-            0.32920506,
-            0.15964008,
-            0.53220806,
-            -0.82599626,
+            0., 0.09983342, 0.19866933, 0.29552021, 0.38941834, 0.47942554, 0.56464247, 0.64421769,
+            0.71735609, 0.78332691, 0.84147098, 0.89120736, 0.93203909, 0.96355819, 0.98544973,
+            0.99749499,
         ]);
 
         let expected2 = arr1(&[
-            7.69577743,
-            2.62287029,
-            10.01411468,
-            3.85282418,
-            10.81975165,
-            16.49297318,
-            14.30499993,
-            10.4859125,
-            4.40348769,
-            5.56751058,
-            9.91837049,
-            4.71902518,
-            11.95816927,
-            15.32312648,
-            2.70478977,
-            13.1072803,
-            15.29854687,
-            7.64396501,
-            13.56666816,
-            16.23310527,
-            1.02985706,
-            14.11000968,
-            12.20873364,
-            3.22182731,
-            4.82327246,
-            3.34067801,
-            11.07206474,
-            7.47018391,
-            4.07894719,
-            12.82418822,
-            0.73430747,
-            17.49504071,
-            6.53712826,
-            7.11302031,
-            5.64773893,
-            10.65740371,
-            4.93400085,
-            4.69097768,
-            12.06268886,
-            19.75054915,
-            3.16489861,
-            14.05630668,
-            14.50266619,
-            9.95938023,
-            6.70953513,
-            5.84247465,
-            10.13910577,
-            8.85252002,
-            0.34389655,
-            5.45729717,
-            13.37242826,
-            17.45610918,
-            6.185361,
-            5.69964193,
-            7.92376485,
-            1.59738062,
-            9.14764518,
-            18.59852037,
-            12.81477622,
-            6.36580449,
-            8.41633164,
-            9.44308588,
-            17.61807186,
-            7.92132952,
-            4.89326539,
+            9.78363033, 2.95376068, 1.40243711, 0.95359203, 0.74589837, 0.63307384, 0.5691891,
+            0.53591029, 0.52553825,
         ]);
 
-        let output = exec_fft(&input, fft.clone()); // TODO: probably not the best way to
-                                                    // accomplish this
-        assert!(output.abs_diff_eq(&expected, 0.1));
-        let output2 = exec_fft(&input2, fft.clone());
-        assert!(output2.abs_diff_eq(&expected2, 0.1));
+        let fft = new_rfft(16);
+        let output = exec_rfft(&input, &fft);
+
+        let epsilon = 1e-3;
+        assert_eq!(output.len(), expected.len());
+        assert!(output.abs_diff_eq(&expected, epsilon));
+        let output2 = exec_rfft(&input2, &fft);
+        assert!(output2.abs_diff_eq(&expected2, epsilon));
+    }
+
+    #[test]
+    fn test_create_mel_bank() {
+        let output = create_mel_bank(44100, 2, 60, 24, 200, 12000);
+        let mut npz_reader = NpzReader::new(File::open("./test/mel_test.npz").unwrap()).unwrap();
+
+        let expected = MelBank {
+            x: npz_reader.by_name("mel_x.npy").unwrap(),
+            y: npz_reader.by_name("mel_y.npy").unwrap(),
+        };
+
+        let epsilon = 1e-3;
+        assert!(output.x.abs_diff_eq(&expected.x, epsilon));
+        assert!(output.y.abs_diff_eq(&expected.y, epsilon));
     }
 }
