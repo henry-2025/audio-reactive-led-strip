@@ -1,0 +1,11 @@
+mic_rate 44100
+device_ip = "192.168.0.150"
+device_port = 7777
+software_gamma_correction = true
+use_gui = true
+fps = 60
+min_frequency = 200
+max_frequency = 12000
+n_fft_bins = 24
+n_rolling_history = 2
+min_volume_threshold = 1e-7

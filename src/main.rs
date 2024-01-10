@@ -3,6 +3,7 @@ use std::fmt::Formatter;
 
 mod config;
 mod dsp;
+mod led;
 
 const DEFAULT_CONFIG_PATH: &str = "$HOME/reactive.conf";
 
@@ -17,6 +18,6 @@ impl fmt::Display for Error {
     }
 }
 
-fn main() -> Result<(), Error> {
-    let conf = config::load_config(&String::from(DEFAULT_CONFIG_PATH)).then;
+fn main() {
+    //let conf = config::load_config(&String::from(DEFAULT_CONFIG_PATH)).then;
 }

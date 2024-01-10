@@ -14,3 +14,4 @@ toml = { version = "0.8.8", features = ["parse"] }
 
 [dev-dependencies]
 ndarray-npy = "0.8.1"
+ndarray-rand = "0.14.0"
