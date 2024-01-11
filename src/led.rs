@@ -4,6 +4,7 @@ use std::{cmp::min, io};
 use ndarray::{arr1, Array1, Array2, Axis, Slice};
 
 use crate::config::Config;
+use crate::gamma_table::GAMMA_TABLE;
 
 #[derive(Debug)]
 struct ESP8266Conn {
@@ -12,21 +13,6 @@ struct ESP8266Conn {
     address: SocketAddr,
 }
 
-static GAMMA_TABLE: &[u8] = &[
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4,
-    4, 4, 5, 5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 11, 11, 11, 12, 12, 13, 13, 14,
-    14, 15, 15, 16, 16, 17, 17, 18, 18, 19, 19, 20, 20, 21, 21, 22, 23, 23, 24, 24, 25, 26, 26, 27,
-    28, 28, 29, 30, 30, 31, 32, 32, 33, 34, 35, 35, 36, 37, 38, 38, 39, 40, 41, 42, 42, 43, 44, 45,
-    46, 47, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
-    68, 69, 70, 71, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 91, 92, 93, 94,
-    95, 97, 98, 99, 100, 102, 103, 104, 105, 107, 108, 109, 111, 112, 113, 115, 116, 117, 119, 120,
-    121, 123, 124, 126, 127, 128, 130, 131, 133, 134, 136, 137, 139, 140, 142, 143, 145, 146, 148,
-    149, 151, 152, 154, 155, 157, 158, 160, 162, 163, 165, 166, 168, 170, 171, 173, 175, 176, 178,
-    180, 181, 183, 185, 186, 188, 190, 192, 193, 195, 197, 199, 200, 202, 204, 206, 207, 209, 211,
-    213, 215, 217, 218, 220, 222, 224, 226, 228, 230, 232, 233, 235, 237, 239, 241, 243, 245, 247,
-    249, 251, 253, 255,
-];
-
 static MAX_PIXELS_PER_PACKET: usize = 126;
 
 impl ESP8266Conn {
@@ -34,7 +20,7 @@ impl ESP8266Conn {
     /// an io error if it cannot bind
     pub fn new(config: &Config) -> Result<ESP8266Conn, std::io::Error> {
         Ok(ESP8266Conn {
-            socket: UdpSocket::bind(format!("127.0.0.1:{}", config.device_port))?,
+            socket: UdpSocket::bind("0.0.0.0:0")?,
             address: format!("{}:{}", config.device_ip, config.device_port)
                 .parse()
                 .expect("Address is not formatted correctly"),
@@ -108,9 +94,9 @@ impl ESP8266Conn {
 
 #[cfg(test)]
 mod test {
-    use std::net::UdpSocket;
+    use std::{net::UdpSocket, thread};
 
-    use ndarray::{Array, Array2};
+    use ndarray::{Array, Array2, Axis, Slice};
     use ndarray_rand::{rand_distr::Uniform, RandomExt};
 
     use crate::config::Config;
@@ -152,11 +138,47 @@ mod test {
         pixels
             .slice_mut(ndarray::s![10..10 + num_different, ..])
             .map_mut(|x| *x += 1);
-        let mut cfg = Config::default();
-        cfg.device_ip = "127.0.0.1".to_string();
-        let receiver = UdpSocket::bind("127.0.0.1:7777").unwrap();
 
-        let conn = ESP8266Conn::new(&Config::default()).unwrap();
-        conn.update(&mut pixels, &mut pixels_prev).unwrap();
+        let conn = ESP8266Conn::new(&Config {
+            device_ip: String::from("127.0.0.1"),
+            device_port: 7777,
+            ..Default::default()
+        })
+        .unwrap();
+        let (px, px_prev) = (pixels.clone(), pixels_prev.clone());
+
+        let handle = thread::spawn(move || {
+            let recv = UdpSocket::bind("127.0.0.1:7777").unwrap();
+            let mut buf = [0; 2048];
+            let recv_len = recv.recv(&mut buf).unwrap();
+
+            // reconstruct transmitted buffer
+            let cmp_buf: Vec<u8> = px
+                .axis_iter(Axis(0))
+                .enumerate()
+                .filter_map(|(idx, val)| {
+                    if val
+                        == px_prev
+                            .slice_axis(
+                                Axis(0),
+                                Slice::new(idx as isize, Some(idx as isize + 1), 1),
+                            )
+                            .into_shape(3)
+                            .unwrap()
+                    {
+                        None
+                    } else {
+                        Some([&[idx as u8], val.to_slice().unwrap()].concat())
+                    }
+                })
+                .flatten()
+                .collect();
+
+            assert_eq!(buf[..recv_len], cmp_buf);
+        });
+
+        let bytes_written = conn.update(&mut pixels, &mut pixels_prev).unwrap();
+        handle.join().unwrap();
+        assert_eq!(bytes_written, num_different * 4);
     }
 }
