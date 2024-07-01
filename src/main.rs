@@ -1,33 +1,59 @@
-use core::fmt;
-use std::fmt::Formatter;
-
 mod audio;
 mod config;
 mod dsp;
 mod gamma_table;
+mod gui;
 mod led;
 
-const DEFAULT_CONFIG_PATH: &str = "$HOME/reactive.conf";
+use iced::widget::{button, column, text};
+use iced::{Alignment, Element, Sandbox, Settings};
 
-use gtk::builders::ApplicationBuilder;
-use gtk::glib::subclass::object::ObjectImpl;
-use gtk::glib::subclass::types::ObjectSubclass;
-use gtk::subclass::range::RangeImpl;
-use gtk::subclass::scale::ScaleImpl;
-use gtk::subclass::widget::WidgetImpl;
-use gtk::{glib, Application, Button};
-use gtk::{prelude::*, ApplicationWindow};
+pub fn main() -> iced::Result {
+    Counter::run(Settings::default())
+}
 
-const APP_ID: &str = "org.gtk_rs.HelloWorld1";
+struct Counter {
+    value: i32,
+}
 
-fn main() -> glib::ExitCode {
-    // Create a new application
-    let app = Application::builder().application_id(APP_ID).build();
+#[derive(Debug, Clone, Copy)]
+enum Message {
+    IncrementPressed,
+    DecrementPressed,
+}
 
-    app.connect_activate(build_ui);
+impl Sandbox for Counter {
+    type Message = Message;
 
-    // Run the application
-    app.run()
+    fn new() -> Self {
+        Self { value: 0 }
+    }
+
+    fn title(&self) -> String {
+        String::from("Counter - Iced")
+    }
+
+    fn update(&mut self, message: Message) {
+        match message {
+            Message::IncrementPressed => {
+                self.value += 1;
+            }
+            Message::DecrementPressed => {
+                self.value -= 1;
+            }
+        }
+    }
+
+    fn view(&self) -> Element<Message> {
+        column![
+            button("Increment").on_press(Message::IncrementPressed),
+            text(self.value).size(50),
+            button("Decrement").on_press(Message::DecrementPressed)
+        ]
+        .padding(20)
+        .align_items(Alignment::Center)
+        .into()
+    }
 }
 
 // for starters, let's build a gui that has a slider and a gl context or cairo rendering area
@@ -37,46 +63,3 @@ fn main() -> glib::ExitCode {
 // then create a dialog for mode selection--probably a dropdown
 // then figure out how to render the spectrum to the graphical display
 //
-
-#[derive(Default)]
-pub struct DualSlider;
-
-#[glib::object_subclass]
-impl ObjectSubclass for DualSlider {
-    const NAME: &'static str = "GtkDualSlider";
-    type Type = DualSlider;
-    type ParentType = gtk::Scale;
-}
-
-impl ObjectImpl for DualSlider {}
-
-impl WidgetImpl for DualSlider {}
-
-impl ScaleImpl for DualSlider {
-    fn layout_offsets(&self) -> (i32, i32) {
-        self.parent_layout_offsets()
-    }
-}
-
-impl RangeImpl for DualSlider {}
-
-fn build_ui(app: &Application) {
-    let button = Button::builder()
-        .label("Press me!")
-        .margin_top(12)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
-        .build();
-
-    button.connect_clicked(|button| {
-        button.set_label("Hello world!");
-    });
-    let window = ApplicationWindow::builder()
-        .application(app)
-        .title("My Gtk App")
-        .child(&button)
-        .build();
-
-    window.present();
-}

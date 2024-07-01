@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 approx = "0.5.1"
 cpal = "0.15.2"
-gtk = { version = "0.7.3", package = "gtk4", features = ["v4_12"] }
+iced = "0.12.1"
 ndarray = { version = "0.15.6", features = ["approx"] }
 rustfft = "6.1.0"
 serde = { version = "1.0.194", features = ["derive"] }
