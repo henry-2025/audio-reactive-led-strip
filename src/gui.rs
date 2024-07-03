@@ -5,7 +5,6 @@ use double_slider::DoubleSlider;
 use iced::widget::horizontal_space;
 use iced::widget::pick_list;
 use iced::widget::row;
-use iced::widget::Slider;
 use iced::{Alignment, Sandbox};
 
 // TODO: add more modes and move this to a new module!

@@ -116,8 +116,8 @@ where
         DoubleSlider {
             left_value,
             right_value,
-            left_default: None,
-            right_default: None,
+            left_default: Some(*range.start()),
+            right_default: Some(*range.end()),
             range,
             step: T::from(1),
             shift_step: None,
@@ -125,8 +125,8 @@ where
             on_release: None,
             width: Length::Fill,
             height: Self::DEFAULT_HEIGHT,
-            style.slider_width,
-            style.slider_height,
+            handle_width: 1.0,
+            handle_height: 1.0,
             style,
         }
     }
@@ -217,13 +217,18 @@ where
         let start: f64 = (*self.range.start()).into();
         let end: f64 = (*self.range.end()).into();
 
-        let left_x: f64 = (self.left_value.into() - start) / (end - start) * self.width;
-        let right_x: f64 = (self.right_value.into() - start) / (end - start) * self.width.into();
+        let left_x: f64 = (self.left_value.into() - start) / (end - start) * 1.0; // TODO: figure out how to get the width from the layout
+        let right_x: f64 = (self.right_value.into() - start) / (end - start) * 1.0;
         let left_slider = layout::Node::new(Size::new(self.handle_width, self.handle_height))
-            .move_to(Point::new(left_x as f32 - self.handle_width / 2.0, self.handle_height / 2.0));
-        let right_slider = layout::Node::new(Size::new(self.handle_width, self.handle_height)).move_to(
-            Point::new(right_x as f32 - self.handle_width / 2.0, self.handle_height / 2.0),
-        );
+            .move_to(Point::new(
+                left_x as f32 - self.handle_width / 2.0,
+                self.handle_height / 2.0,
+            ));
+        let right_slider = layout::Node::new(Size::new(self.handle_width, self.handle_height))
+            .move_to(Point::new(
+                right_x as f32 - self.handle_width / 2.0,
+                self.handle_height / 2.0,
+            ));
 
         layout::Node::with_children(
             limits.resolve(self.width, self.height, Size::ZERO),
@@ -353,8 +358,10 @@ where
         let end: f64 = (*range.end()).into();
 
         // get the left and right x values of the current sliders
-        let left_x: f32 = ((current_left_value.into() - start) / (end - start)) as f32 * bounds.width + bounds.x;
-        let right_x: f32 = ((current_right_value.into() - start) / (end - start)) as f32 * bounds.width + bounds.x;
+        let left_x: f32 =
+            ((current_left_value.into() - start) / (end - start)) as f32 * bounds.width + bounds.x;
+        let right_x: f32 =
+            ((current_right_value.into() - start) / (end - start)) as f32 * bounds.width + bounds.x;
         let new_value = match slider_side {
             SliderSide::Left if cursor_position.x <= bounds.x => Some(*range.start()),
             SliderSide::Left if cursor_position.x >= left_x => Some(current_left_value),
@@ -414,8 +421,8 @@ where
         T::from_f64(new_value)
     };
 
-    let change = |side: SliderSide| {
-        |new_value: T| match side {
+    let mut change = |new_value: Option<T>, side: SliderSide| match new_value {
+        Some(new_value) => match side {
             SliderSide::Left if ((*left_value).into() - new_value.into()).abs() > f64::EPSILON => {
                 shell.publish((on_change)(new_value));
                 *left_value = new_value;
@@ -424,10 +431,11 @@ where
                 if ((*right_value).into() - new_value.into()).abs() > f64::EPSILON =>
             {
                 shell.publish((on_change)(new_value));
-                *left_value = new_value;
+                *right_value = new_value;
             }
-            _ => {}
-        }
+            _ => (),
+        },
+        None => (),
     };
 
     match event {
@@ -435,10 +443,10 @@ where
         | Event::Touch(touch::Event::FingerPressed { .. }) => {
             if let Some(cursor_position) = cursor.position_over(left_layout.bounds()) {
                 if state.keyboard_modifiers.command() {
-                    let _ = left_default.map(change(SliderSide::Left));
+                    change(left_default, SliderSide::Left);
                     state.is_dragging = false;
                 } else {
-                    let _ = locate(cursor_position).map(change(SliderSide::Left));
+                    change(locate(cursor_position), SliderSide::Left);
                     state.is_dragging = true;
                     state.slider_side = Some(SliderSide::Left);
                 }
@@ -446,10 +454,10 @@ where
                 return event::Status::Captured;
             } else if let Some(cursor_position) = cursor.position_over(right_layout.bounds()) {
                 if state.keyboard_modifiers.command() {
-                    let _ = right_default.map(change(SliderSide::Right));
+                    change(right_default, SliderSide::Right);
                     state.is_dragging = false;
                 } else {
-                    let _ = locate(cursor_position).map(change(SliderSide::Right));
+                    change(locate(cursor_position), SliderSide::Right);
                     state.is_dragging = true;
                     state.slider_side = Some(SliderSide::Right);
                 }
@@ -473,10 +481,10 @@ where
         | Event::Touch(touch::Event::FingerMoved { .. }) => {
             if is_dragging {
                 match state.slider_side {
-                    Some(slider_side) => {
-                        cursor.position().and_then(locate).map(change(slider_side));
+                    Some(side) => {
+                        change(cursor.position().and_then(locate), side);
                     }
-                    None => {}
+                    None => (),
                 }
 
                 return event::Status::Captured;
@@ -761,7 +769,7 @@ pub struct Style {
 
 /// The style of a slider.
 #[derive(Default)]
-pub enum Slider {
+pub enum DoubleSliderStyle {
     /// The default style.
     #[default]
     Default,
@@ -770,11 +778,11 @@ pub enum Slider {
 }
 
 impl StyleSheet for Theme {
-    type Style = Slider;
+    type Style = DoubleSliderStyle;
 
     fn active(&self, style: &Self::Style) -> Appearance {
         match style {
-            Slider::Default => {
+            DoubleSliderStyle::Default => {
                 let palette = self.extended_palette();
 
                 let handle = Handle {
@@ -800,13 +808,13 @@ impl StyleSheet for Theme {
                     },
                 }
             }
-            Slider::Custom(custom) => custom.active(self),
+            DoubleSliderStyle::Custom(custom) => custom.active(self),
         }
     }
 
     fn hovered(&self, style: &Self::Style) -> Appearance {
         match style {
-            Slider::Default => {
+            DoubleSliderStyle::Default => {
                 let active = self.active(style);
                 let palette = self.extended_palette();
 
@@ -818,13 +826,13 @@ impl StyleSheet for Theme {
                     ..active
                 }
             }
-            Slider::Custom(custom) => custom.hovered(self),
+            DoubleSliderStyle::Custom(custom) => custom.hovered(self),
         }
     }
 
     fn dragging(&self, style: &Self::Style) -> Appearance {
         match style {
-            Slider::Default => {
+            DoubleSliderStyle::Default => {
                 let active = self.active(style);
                 let palette = self.extended_palette();
 
@@ -836,7 +844,7 @@ impl StyleSheet for Theme {
                     ..active
                 }
             }
-            Slider::Custom(custom) => custom.dragging(self),
+            DoubleSliderStyle::Custom(custom) => custom.dragging(self),
         }
     }
 }
