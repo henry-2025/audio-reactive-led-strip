@@ -9,7 +9,10 @@ edition = "2021"
 approx = "0.5.1"
 cpal = "0.15.2"
 iced = "0.12.1"
+iced_core = "0.12.3"
+iced_style = "0.12.1"
 ndarray = { version = "0.15.6", features = ["approx"] }
+num-traits = "0.2.19"
 rustfft = "6.1.0"
 serde = { version = "1.0.194", features = ["derive"] }
 toml = { version = "0.8.8", features = ["parse"] }
