@@ -1,22 +1,21 @@
 //! Display an interactive selector of a two sliders that cannot cross one another in a single range of values.
 //!
 //! A [`DoubleSlider`] has some local [`State`].
+use iced::{touch, Theme};
+use iced_core::border;
 use iced_core::event::{self, Event};
 use iced_core::keyboard;
-use iced_core::keyboard::key::{self, Key};
 use iced_core::layout;
 use iced_core::mouse;
 use iced_core::renderer;
-use iced_core::touch;
 use iced_core::widget::tree::{self, Tree};
+use iced_core::Color;
 use iced_core::{
     Border, Clipboard, Element, Layout, Length, Pixels, Point, Rectangle, Shell, Size, Widget,
 };
 
 use std::cmp::min;
 use std::ops::RangeInclusive;
-
-pub use iced_style::slider::{Appearance, Handle, HandleShape, Rail, StyleSheet};
 
 /// An horizontal bar and a handle that selects a single value from a range of
 /// values.
@@ -46,6 +45,7 @@ pub use iced_style::slider::{Appearance, Handle, HandleShape, Rail, StyleSheet};
 pub struct DoubleSlider<'a, T, Message, Theme = iced::Theme>
 where
     Theme: StyleSheet,
+    T: Into<f64>,
 {
     range: RangeInclusive<T>,
     step: T,
@@ -58,12 +58,14 @@ where
     on_release: Option<Message>,
     width: Length,
     height: f32,
+    handle_width: f32,
+    handle_height: f32,
     style: Theme::Style,
 }
 
 impl<'a, T, Message, Theme> DoubleSlider<'a, T, Message, Theme>
 where
-    T: Copy + From<u8> + Ord,
+    T: Copy + From<u8> + Into<f64> + Ord,
     Message: Clone,
     Theme: StyleSheet,
 {
@@ -109,6 +111,8 @@ where
         // shouldn't ever have left > right
         let left_value = min(left_value, right_value);
 
+        let style = Theme::Style::default();
+
         DoubleSlider {
             left_value,
             right_value,
@@ -121,7 +125,9 @@ where
             on_release: None,
             width: Length::Fill,
             height: Self::DEFAULT_HEIGHT,
-            style: Default::default(),
+            style.slider_width,
+            style.slider_height,
+            style,
         }
     }
 
@@ -207,7 +213,22 @@ where
         _renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        layout::atomic(limits, self.width, self.height)
+        // get the positions relative to the parent
+        let start: f64 = (*self.range.start()).into();
+        let end: f64 = (*self.range.end()).into();
+
+        let left_x: f64 = (self.left_value.into() - start) / (end - start) * self.width;
+        let right_x: f64 = (self.right_value.into() - start) / (end - start) * self.width.into();
+        let left_slider = layout::Node::new(Size::new(self.handle_width, self.handle_height))
+            .move_to(Point::new(left_x as f32 - self.handle_width / 2.0, self.handle_height / 2.0));
+        let right_slider = layout::Node::new(Size::new(self.handle_width, self.handle_height)).move_to(
+            Point::new(right_x as f32 - self.handle_width / 2.0, self.handle_height / 2.0),
+        );
+
+        layout::Node::with_children(
+            limits.resolve(self.width, self.height, Size::ZERO),
+            vec![left_slider, right_slider],
+        )
     }
 
     fn on_event(
@@ -310,33 +331,50 @@ where
     Message: Clone,
 {
     let is_dragging = state.is_dragging;
-    let current_value = *value;
+    let slider_side = state.slider_side;
+    let (current_left_value, current_right_value) = (*left_value, *right_value);
+    let layouts = layout.children().collect::<Vec<Layout>>();
+    let (left_layout, right_layout) = (layouts[0], layouts[1]);
 
+    // extract the value of the slider based on the cursor position
     let locate = |cursor_position: Point| -> Option<T> {
         let bounds = layout.bounds();
-        let new_value = if cursor_position.x <= bounds.x {
-            Some(*range.start())
-        } else if cursor_position.x >= bounds.x + bounds.width {
-            Some(*range.end())
-        } else {
-            let step = if state.keyboard_modifiers.shift() {
-                shift_step.unwrap_or(step)
-            } else {
-                step
+        /*We have several cases:
+        1. slider_side is left
+            a. if the xpos is less than the left bound, then return *range.start()
+            b. if the xpos is greater than the right cursor, then return the right cursor position
+        2. slider_side is right
+            a. if the xpos is greater than the right bound, then return *range.end()
+            b. if the xpos is less than than the left cursor, then return the left cursor position
+        */
+
+        let slider_side = slider_side.unwrap();
+        let start: f64 = (*range.start()).into();
+        let end: f64 = (*range.end()).into();
+
+        // get the left and right x values of the current sliders
+        let left_x: f32 = ((current_left_value.into() - start) / (end - start)) as f32 * bounds.width + bounds.x;
+        let right_x: f32 = ((current_right_value.into() - start) / (end - start)) as f32 * bounds.width + bounds.x;
+        let new_value = match slider_side {
+            SliderSide::Left if cursor_position.x <= bounds.x => Some(*range.start()),
+            SliderSide::Left if cursor_position.x >= left_x => Some(current_left_value),
+            SliderSide::Right if cursor_position.x >= bounds.x + bounds.width => Some(*range.end()),
+            SliderSide::Right if cursor_position.x <= right_x => Some(current_right_value),
+            _ => {
+                let step = if state.keyboard_modifiers.shift() {
+                    shift_step.unwrap_or(step)
+                } else {
+                    step
+                }
+                .into();
+
+                let percent = f64::from(cursor_position.x - bounds.x) / f64::from(bounds.width);
+
+                let steps = (percent * (end - start) / step).round();
+                let value = steps * step + start;
+                T::from_f64(value)
             }
-            .into();
-
-            let start = (*range.start()).into();
-            let end = (*range.end()).into();
-
-            let percent = f64::from(cursor_position.x - bounds.x) / f64::from(bounds.width);
-
-            let steps = (percent * (end - start) / step).round();
-            let value = steps * step + start;
-
-            T::from_f64(value)
         };
-
         new_value
     };
 
@@ -376,24 +414,44 @@ where
         T::from_f64(new_value)
     };
 
-    let change = |new_value: T| {
-        if ((*value).into() - new_value.into()).abs() > f64::EPSILON {
-            shell.publish((on_change)(new_value));
-
-            *value = new_value;
+    let change = |side: SliderSide| {
+        |new_value: T| match side {
+            SliderSide::Left if ((*left_value).into() - new_value.into()).abs() > f64::EPSILON => {
+                shell.publish((on_change)(new_value));
+                *left_value = new_value;
+            }
+            SliderSide::Right
+                if ((*right_value).into() - new_value.into()).abs() > f64::EPSILON =>
+            {
+                shell.publish((on_change)(new_value));
+                *left_value = new_value;
+            }
+            _ => {}
         }
     };
 
     match event {
         Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
         | Event::Touch(touch::Event::FingerPressed { .. }) => {
-            if let Some(cursor_position) = cursor.position_over(layout.bounds()) {
+            if let Some(cursor_position) = cursor.position_over(left_layout.bounds()) {
                 if state.keyboard_modifiers.command() {
-                    let _ = default.map(change);
+                    let _ = left_default.map(change(SliderSide::Left));
                     state.is_dragging = false;
                 } else {
-                    let _ = locate(cursor_position).map(change);
+                    let _ = locate(cursor_position).map(change(SliderSide::Left));
                     state.is_dragging = true;
+                    state.slider_side = Some(SliderSide::Left);
+                }
+
+                return event::Status::Captured;
+            } else if let Some(cursor_position) = cursor.position_over(right_layout.bounds()) {
+                if state.keyboard_modifiers.command() {
+                    let _ = right_default.map(change(SliderSide::Right));
+                    state.is_dragging = false;
+                } else {
+                    let _ = locate(cursor_position).map(change(SliderSide::Right));
+                    state.is_dragging = true;
+                    state.slider_side = Some(SliderSide::Right);
                 }
 
                 return event::Status::Captured;
@@ -414,29 +472,35 @@ where
         Event::Mouse(mouse::Event::CursorMoved { .. })
         | Event::Touch(touch::Event::FingerMoved { .. }) => {
             if is_dragging {
-                let _ = cursor.position().and_then(locate).map(change);
-
-                return event::Status::Captured;
-            }
-        }
-        Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => {
-            if cursor.position_over(layout.bounds()).is_some() {
-                match key {
-                    Key::Named(key::Named::ArrowUp) => {
-                        let _ = increment(current_value).map(change);
+                match state.slider_side {
+                    Some(slider_side) => {
+                        cursor.position().and_then(locate).map(change(slider_side));
                     }
-                    Key::Named(key::Named::ArrowDown) => {
-                        let _ = decrement(current_value).map(change);
-                    }
-                    _ => (),
+                    None => {}
                 }
 
                 return event::Status::Captured;
             }
         }
-        Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
-            state.keyboard_modifiers = modifiers;
-        }
+        // TODO(jhpick): implement increment/decrement for keyboard
+        //Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => {
+        //    if cursor.position_over(layout.bounds()).is_some() {
+        //        match key {
+        //            Key::Named(key::Named::ArrowUp) => {
+        //                let _ = increment(current_value).map(change);
+        //            }
+        //            Key::Named(key::Named::ArrowDown) => {
+        //                let _ = decrement(current_value).map(change);
+        //            }
+        //            _ => (),
+        //        }
+
+        //        return event::Status::Captured;
+        //    }
+        //}
+        //Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+        //    state.keyboard_modifiers = modifiers;
+        //}
         _ => {}
     }
 
@@ -478,27 +542,36 @@ pub fn draw<T, Theme, Renderer>(
         } => (f32::from(width), bounds.height, border_radius),
     };
 
-    let value = value.into() as f32;
+    let left_value = left_value.into() as f32;
+    let right_value = right_value.into() as f32;
     let (range_start, range_end) = {
         let (start, end) = range.clone().into_inner();
 
         (start.into() as f32, end.into() as f32)
     };
 
-    let offset = if range_start >= range_end {
+    let left_offset = if range_start >= range_end {
         0.0
     } else {
-        (bounds.width - handle_width) * (value - range_start) / (range_end - range_start)
+        (bounds.width - handle_width * 2.0) * (left_value - range_start) / (range_end - range_start)
+    };
+
+    let right_offset = if range_start >= range_end {
+        0.0
+    } else {
+        (bounds.width - handle_width * 2.0) * (right_value - range_start)
+            / (range_end - range_start)
     };
 
     let rail_y = bounds.y + bounds.height / 2.0;
 
+    // Left of the handle
     renderer.fill_quad(
         renderer::Quad {
             bounds: Rectangle {
                 x: bounds.x,
                 y: rail_y - style.rail.width / 2.0,
-                width: offset + handle_width / 2.0,
+                width: left_offset + handle_width / 2.0,
                 height: style.rail.width,
             },
             border: Border::with_radius(style.rail.border_radius),
@@ -507,24 +580,11 @@ pub fn draw<T, Theme, Renderer>(
         style.rail.colors.0,
     );
 
+    // The left handle
     renderer.fill_quad(
         renderer::Quad {
             bounds: Rectangle {
-                x: bounds.x + offset + handle_width / 2.0,
-                y: rail_y - style.rail.width / 2.0,
-                width: bounds.width - offset - handle_width / 2.0,
-                height: style.rail.width,
-            },
-            border: Border::with_radius(style.rail.border_radius),
-            ..renderer::Quad::default()
-        },
-        style.rail.colors.1,
-    );
-
-    renderer.fill_quad(
-        renderer::Quad {
-            bounds: Rectangle {
-                x: bounds.x + offset,
+                x: bounds.x + left_offset,
                 y: rail_y - handle_height / 2.0,
                 width: handle_width,
                 height: handle_height,
@@ -537,6 +597,55 @@ pub fn draw<T, Theme, Renderer>(
             ..renderer::Quad::default()
         },
         style.handle.color,
+    );
+
+    // between the handles
+    renderer.fill_quad(
+        renderer::Quad {
+            bounds: Rectangle {
+                x: bounds.x + left_offset + handle_width / 2.0,
+                y: rail_y - style.rail.width / 2.0,
+                width: bounds.width - right_offset - handle_width,
+                height: style.rail.width,
+            },
+            border: Border::with_radius(style.rail.border_radius),
+            ..renderer::Quad::default()
+        },
+        style.rail.colors.1,
+    );
+
+    // The right handle
+    renderer.fill_quad(
+        renderer::Quad {
+            bounds: Rectangle {
+                x: bounds.x + right_offset,
+                y: rail_y - handle_height / 2.0,
+                width: handle_width,
+                height: handle_height,
+            },
+            border: Border {
+                radius: handle_border_radius,
+                width: style.handle.border_width,
+                color: style.handle.border_color,
+            },
+            ..renderer::Quad::default()
+        },
+        style.handle.color,
+    );
+
+    // Right of the left handle
+    renderer.fill_quad(
+        renderer::Quad {
+            bounds: Rectangle {
+                x: bounds.x + right_offset + handle_width / 2.0,
+                y: rail_y - style.rail.width / 2.0,
+                width: bounds.width - right_offset - handle_width / 2.0,
+                height: style.rail.width,
+            },
+            border: Border::with_radius(style.rail.border_radius),
+            ..renderer::Quad::default()
+        },
+        style.rail.colors.1,
     );
 }
 
@@ -558,10 +667,17 @@ pub fn mouse_interaction(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SliderSide {
+    Left,
+    Right,
+}
+
 /// The local state of a [`Slider`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct State {
     is_dragging: bool,
+    slider_side: Option<SliderSide>,
     keyboard_modifiers: keyboard::Modifiers,
 }
 
@@ -569,5 +685,158 @@ impl State {
     /// Creates a new [`State`].
     pub fn new() -> State {
         State::default()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Appearance {
+    /// The colors of the rail of the slider.
+    pub rail: Rail,
+    /// The appearance of the [`Handle`] of the slider.
+    pub handle: Handle,
+}
+
+/// The appearance of a slider rail
+#[derive(Debug, Clone, Copy)]
+pub struct Rail {
+    /// The colors of the rail of the slider.
+    pub colors: (Color, Color),
+    /// The width of the stroke of a slider rail.
+    pub width: f32,
+    /// The border radius of the corners of the rail.
+    pub border_radius: border::Radius,
+}
+
+/// The appearance of the handle of a slider.
+#[derive(Debug, Clone, Copy)]
+pub struct Handle {
+    /// The shape of the handle.
+    pub shape: HandleShape,
+    /// The [`Color`] of the handle.
+    pub color: Color,
+    /// The border width of the handle.
+    pub border_width: f32,
+    /// The border [`Color`] of the handle.
+    pub border_color: Color,
+}
+
+/// The shape of the handle of a slider.
+#[derive(Debug, Clone, Copy)]
+pub enum HandleShape {
+    /// A circular handle.
+    Circle {
+        /// The radius of the circle.
+        radius: f32,
+    },
+    /// A rectangular shape.
+    Rectangle {
+        /// The width of the rectangle.
+        width: u16,
+        /// The border radius of the corners of the rectangle.
+        border_radius: border::Radius,
+    },
+}
+
+/// A set of rules that dictate the style of a slider.
+pub trait StyleSheet {
+    /// The supported style of the [`StyleSheet`].
+    type Style: Default;
+
+    /// Produces the style of an active slider.
+    fn active(&self, style: &Self::Style) -> Appearance;
+
+    /// Produces the style of an hovered slider.
+    fn hovered(&self, style: &Self::Style) -> Appearance;
+
+    /// Produces the style of a slider that is being dragged.
+    fn dragging(&self, style: &Self::Style) -> Appearance;
+}
+
+/// The appearance of a slider.
+#[derive(Debug, Clone, Copy)]
+pub struct Style {
+    pub rail_colors: (Color, Color),
+    pub handle: Handle,
+}
+
+/// The style of a slider.
+#[derive(Default)]
+pub enum Slider {
+    /// The default style.
+    #[default]
+    Default,
+    /// A custom style.
+    Custom(Box<dyn StyleSheet<Style = Theme>>),
+}
+
+impl StyleSheet for Theme {
+    type Style = Slider;
+
+    fn active(&self, style: &Self::Style) -> Appearance {
+        match style {
+            Slider::Default => {
+                let palette = self.extended_palette();
+
+                let handle = Handle {
+                    shape: HandleShape::Rectangle {
+                        width: 8,
+                        border_radius: 4.0.into(),
+                    },
+                    color: Color::WHITE,
+                    border_color: Color::WHITE,
+                    border_width: 1.0,
+                };
+
+                Appearance {
+                    rail: Rail {
+                        colors: (palette.primary.base.color, palette.secondary.base.color),
+                        width: 4.0,
+                        border_radius: 2.0.into(),
+                    },
+                    handle: Handle {
+                        color: palette.background.base.color,
+                        border_color: palette.primary.base.color,
+                        ..handle
+                    },
+                }
+            }
+            Slider::Custom(custom) => custom.active(self),
+        }
+    }
+
+    fn hovered(&self, style: &Self::Style) -> Appearance {
+        match style {
+            Slider::Default => {
+                let active = self.active(style);
+                let palette = self.extended_palette();
+
+                Appearance {
+                    handle: Handle {
+                        color: palette.primary.weak.color,
+                        ..active.handle
+                    },
+                    ..active
+                }
+            }
+            Slider::Custom(custom) => custom.hovered(self),
+        }
+    }
+
+    fn dragging(&self, style: &Self::Style) -> Appearance {
+        match style {
+            Slider::Default => {
+                let active = self.active(style);
+                let palette = self.extended_palette();
+
+                Appearance {
+                    handle: Handle {
+                        color: palette.primary.base.color,
+                        ..active.handle
+                    },
+                    ..active
+                }
+            }
+            Slider::Custom(custom) => custom.dragging(self),
+        }
     }
 }

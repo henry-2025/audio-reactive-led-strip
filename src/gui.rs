@@ -5,6 +5,7 @@ use double_slider::DoubleSlider;
 use iced::widget::horizontal_space;
 use iced::widget::pick_list;
 use iced::widget::row;
+use iced::widget::Slider;
 use iced::{Alignment, Sandbox};
 
 // TODO: add more modes and move this to a new module!
@@ -82,7 +83,12 @@ impl Sandbox for Gui {
             GuiMessage::ModeSelected,
         );
 
-        let slider = DoubleSlider::new(0..=20000, self.left_slider, GuiMessage::LeftSlider);
+        let slider = DoubleSlider::new(
+            0..=20000,
+            self.left_slider,
+            self.right_slider,
+            GuiMessage::LeftSlider,
+        );
 
         let controls_bar = row![
             horizontal_space().width(30),
