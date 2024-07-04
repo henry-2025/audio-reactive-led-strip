@@ -57,7 +57,7 @@ impl Sandbox for Gui {
         Self {
             selected_mode: Some(DisplayMode::Frequency),
             left_slider: 0,
-            right_slider: 0,
+            right_slider: 20000,
         }
     }
 
@@ -83,7 +83,7 @@ impl Sandbox for Gui {
         );
 
         let slider = DoubleSlider::new(
-            0..=20000,
+            self.left_slider..=self.right_slider,
             self.left_slider,
             self.right_slider,
             GuiMessage::LeftSlider,

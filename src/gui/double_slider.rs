@@ -125,8 +125,8 @@ where
             on_release: None,
             width: Length::Fill,
             height: Self::DEFAULT_HEIGHT,
-            handle_width: 1.0,
-            handle_height: 1.0,
+            handle_width: 8.0,
+            handle_height: 20.0,
             style,
         }
     }
@@ -213,27 +213,21 @@ where
         _renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
+        let dims = limits.resolve(self.width, self.height, Size::ZERO);
         // get the positions relative to the parent
         let start: f64 = (*self.range.start()).into();
         let end: f64 = (*self.range.end()).into();
 
-        let left_x: f64 = (self.left_value.into() - start) / (end - start) * 1.0; // TODO: figure out how to get the width from the layout
-        let right_x: f64 = (self.right_value.into() - start) / (end - start) * 1.0;
+        let left_x: f32 = ((self.left_value.into() - start) / (end - start)) as f32 * dims.width
+            - self.handle_width / 2.0;
+        let right_x: f32 = ((self.right_value.into() - start) / (end - start)) as f32 * dims.width
+            - self.handle_width / 2.0;
         let left_slider = layout::Node::new(Size::new(self.handle_width, self.handle_height))
-            .move_to(Point::new(
-                left_x as f32 - self.handle_width / 2.0,
-                self.handle_height / 2.0,
-            ));
+            .move_to(Point::new(left_x, 0.0));
         let right_slider = layout::Node::new(Size::new(self.handle_width, self.handle_height))
-            .move_to(Point::new(
-                right_x as f32 - self.handle_width / 2.0,
-                self.handle_height / 2.0,
-            ));
+            .move_to(Point::new(right_x, 0.0));
 
-        layout::Node::with_children(
-            limits.resolve(self.width, self.height, Size::ZERO),
-            vec![left_slider, right_slider],
-        )
+        layout::Node::with_children(dims, vec![left_slider, right_slider])
     }
 
     fn on_event(
@@ -353,6 +347,9 @@ where
             b. if the xpos is less than than the left cursor, then return the left cursor position
         */
 
+        if slider_side.is_none() {
+            return None;
+        }
         let slider_side = slider_side.unwrap();
         let start: f64 = (*range.start()).into();
         let end: f64 = (*range.end()).into();
@@ -385,6 +382,7 @@ where
         new_value
     };
 
+    // TODO: these are used when we implement keyboard use
     let increment = |value: T| -> Option<T> {
         let step = if state.keyboard_modifiers.shift() {
             shift_step.unwrap_or(step)
@@ -441,6 +439,9 @@ where
     match event {
         Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
         | Event::Touch(touch::Event::FingerPressed { .. }) => {
+            let right_bounds = right_layout.bounds();
+            let left_bounds = left_layout.bounds();
+            let c = cursor.position().unwrap();
             if let Some(cursor_position) = cursor.position_over(left_layout.bounds()) {
                 if state.keyboard_modifiers.command() {
                     change(left_default, SliderSide::Left);
@@ -561,25 +562,24 @@ pub fn draw<T, Theme, Renderer>(
     let left_offset = if range_start >= range_end {
         0.0
     } else {
-        (bounds.width - handle_width * 2.0) * (left_value - range_start) / (range_end - range_start)
+        bounds.width * (left_value - range_start) / (range_end - range_start)
     };
 
     let right_offset = if range_start >= range_end {
         0.0
     } else {
-        (bounds.width - handle_width * 2.0) * (right_value - range_start)
-            / (range_end - range_start)
+        bounds.width * (right_value - range_start) / (range_end - range_start)
     };
 
     let rail_y = bounds.y + bounds.height / 2.0;
 
-    // Left of the handle
+    // Left of the left handle
     renderer.fill_quad(
         renderer::Quad {
             bounds: Rectangle {
                 x: bounds.x,
                 y: rail_y - style.rail.width / 2.0,
-                width: left_offset + handle_width / 2.0,
+                width: left_offset - handle_width / 2.0,
                 height: style.rail.width,
             },
             border: Border::with_radius(style.rail.border_radius),
@@ -588,11 +588,43 @@ pub fn draw<T, Theme, Renderer>(
         style.rail.colors.0,
     );
 
+    //TODO(jhpick): remove these when done developing
+    // left and right hitboxes
+    let children = layout.children().collect::<Vec<Layout>>();
+    let left_node = children[0];
+    let right_node = children[1];
+    renderer.fill_quad(
+        renderer::Quad {
+            bounds: Rectangle {
+                x: left_node.position().x,
+                y: left_node.position().y,
+                width: left_node.bounds().width,
+                height: left_node.bounds().height,
+            },
+            border: Border::default(),
+            ..renderer::Quad::default()
+        },
+        Color::from_rgb8(0, 255, 0),
+    );
+    renderer.fill_quad(
+        renderer::Quad {
+            bounds: Rectangle {
+                x: right_node.position().x,
+                y: right_node.position().y,
+                width: right_node.bounds().width,
+                height: right_node.bounds().height,
+            },
+            border: Border::default(),
+            ..renderer::Quad::default()
+        },
+        Color::from_rgb8(0, 0, 255),
+    );
+
     // The left handle
     renderer.fill_quad(
         renderer::Quad {
             bounds: Rectangle {
-                x: bounds.x + left_offset,
+                x: bounds.x + left_offset - handle_width / 2.0,
                 y: rail_y - handle_height / 2.0,
                 width: handle_width,
                 height: handle_height,
@@ -613,7 +645,7 @@ pub fn draw<T, Theme, Renderer>(
             bounds: Rectangle {
                 x: bounds.x + left_offset + handle_width / 2.0,
                 y: rail_y - style.rail.width / 2.0,
-                width: bounds.width - right_offset - handle_width,
+                width: right_offset - left_offset - handle_width,
                 height: style.rail.width,
             },
             border: Border::with_radius(style.rail.border_radius),
@@ -626,7 +658,7 @@ pub fn draw<T, Theme, Renderer>(
     renderer.fill_quad(
         renderer::Quad {
             bounds: Rectangle {
-                x: bounds.x + right_offset,
+                x: bounds.x + right_offset - handle_width / 2.0,
                 y: rail_y - handle_height / 2.0,
                 width: handle_width,
                 height: handle_height,
@@ -641,13 +673,13 @@ pub fn draw<T, Theme, Renderer>(
         style.handle.color,
     );
 
-    // Right of the left handle
+    // Right of the right handle
     renderer.fill_quad(
         renderer::Quad {
             bounds: Rectangle {
                 x: bounds.x + right_offset + handle_width / 2.0,
                 y: rail_y - style.rail.width / 2.0,
-                width: bounds.width - right_offset - handle_width / 2.0,
+                width: bounds.width - right_offset,
                 height: style.rail.width,
             },
             border: Border::with_radius(style.rail.border_radius),
