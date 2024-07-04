@@ -83,7 +83,7 @@ impl Sandbox for Gui {
         );
 
         let slider = DoubleSlider::new(
-            self.left_slider..=self.right_slider,
+            0..=20000,
             self.left_slider,
             self.right_slider,
             GuiMessage::LeftSlider,

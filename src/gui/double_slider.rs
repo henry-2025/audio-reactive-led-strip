@@ -15,6 +15,7 @@ use iced_core::{
 };
 
 use std::cmp::min;
+use std::fmt::{Debug, Display};
 use std::ops::RangeInclusive;
 
 /// An horizontal bar and a handle that selects a single value from a range of
@@ -187,7 +188,7 @@ where
 impl<'a, T, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for DoubleSlider<'a, T, Message, Theme>
 where
-    T: Copy + Into<f64> + num_traits::FromPrimitive,
+    T: Copy + Into<f64> + num_traits::FromPrimitive + Debug,
     Message: Clone,
     Theme: StyleSheet,
     Renderer: iced_core::Renderer,
@@ -297,7 +298,7 @@ where
 impl<'a, T, Message, Theme, Renderer> From<DoubleSlider<'a, T, Message, Theme>>
     for Element<'a, Message, Theme, Renderer>
 where
-    T: Copy + Into<f64> + num_traits::FromPrimitive + 'a,
+    T: Copy + Into<f64> + num_traits::FromPrimitive + 'a + Debug,
     Message: Clone + 'a,
     Theme: StyleSheet + 'a,
     Renderer: iced_core::Renderer + 'a,
@@ -326,7 +327,7 @@ pub fn update<Message, T>(
     on_release: &Option<Message>,
 ) -> event::Status
 where
-    T: Copy + Into<f64> + num_traits::FromPrimitive,
+    T: Copy + Into<f64> + Debug + num_traits::FromPrimitive,
     Message: Clone,
 {
     let is_dragging = state.is_dragging;
@@ -360,10 +361,22 @@ where
         let right_x: f32 =
             ((current_right_value.into() - start) / (end - start)) as f32 * bounds.width + bounds.x;
         let new_value = match slider_side {
-            SliderSide::Left if cursor_position.x <= bounds.x => Some(*range.start()),
-            SliderSide::Left if cursor_position.x >= left_x => Some(current_left_value),
-            SliderSide::Right if cursor_position.x >= bounds.x + bounds.width => Some(*range.end()),
-            SliderSide::Right if cursor_position.x <= right_x => Some(current_right_value),
+            SliderSide::Left if cursor_position.x <= bounds.x => {
+                print!("Case 1");
+                Some(*range.start())
+            }
+            SliderSide::Left if cursor_position.x >= right_x => {
+                print!("Case 2");
+                Some(current_right_value)
+            }
+            SliderSide::Right if cursor_position.x >= bounds.x + bounds.width => {
+                print!("Case 3");
+                Some(*range.end())
+            }
+            SliderSide::Right if cursor_position.x <= left_x => {
+                print!("Case 4");
+                Some(current_left_value)
+            }
             _ => {
                 let step = if state.keyboard_modifiers.shift() {
                     shift_step.unwrap_or(step)
@@ -419,30 +432,33 @@ where
         T::from_f64(new_value)
     };
 
-    let mut change = |new_value: Option<T>, side: SliderSide| match new_value {
-        Some(new_value) => match side {
-            SliderSide::Left if ((*left_value).into() - new_value.into()).abs() > f64::EPSILON => {
-                shell.publish((on_change)(new_value));
-                *left_value = new_value;
-            }
-            SliderSide::Right
-                if ((*right_value).into() - new_value.into()).abs() > f64::EPSILON =>
-            {
-                shell.publish((on_change)(new_value));
-                *right_value = new_value;
-            }
-            _ => (),
-        },
-        None => (),
+    let mut change = |new_value: Option<T>, side: SliderSide| {
+        print!("{:?}, {:?}\n", left_value, right_value);
+        match new_value {
+            Some(new_value) => match side {
+                SliderSide::Left
+                    if ((*left_value).into() - new_value.into()).abs() > f64::EPSILON =>
+                {
+                    shell.publish((on_change)(new_value));
+                    *left_value = new_value;
+                }
+                SliderSide::Right
+                    if ((*right_value).into() - new_value.into()).abs() > f64::EPSILON =>
+                {
+                    shell.publish((on_change)(new_value));
+                    *right_value = new_value;
+                }
+                _ => (),
+            },
+            None => (),
+        }
     };
 
     match event {
         Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
         | Event::Touch(touch::Event::FingerPressed { .. }) => {
-            let right_bounds = right_layout.bounds();
-            let left_bounds = left_layout.bounds();
-            let c = cursor.position().unwrap();
             if let Some(cursor_position) = cursor.position_over(left_layout.bounds()) {
+                print!("over left\n");
                 if state.keyboard_modifiers.command() {
                     change(left_default, SliderSide::Left);
                     state.is_dragging = false;
@@ -454,6 +470,7 @@ where
 
                 return event::Status::Captured;
             } else if let Some(cursor_position) = cursor.position_over(right_layout.bounds()) {
+                print!("over right\n");
                 if state.keyboard_modifiers.command() {
                     change(right_default, SliderSide::Right);
                     state.is_dragging = false;
@@ -585,7 +602,7 @@ pub fn draw<T, Theme, Renderer>(
             border: Border::with_radius(style.rail.border_radius),
             ..renderer::Quad::default()
         },
-        style.rail.colors.0,
+        style.rail.colors.1,
     );
 
     //TODO(jhpick): remove these when done developing
@@ -651,7 +668,7 @@ pub fn draw<T, Theme, Renderer>(
             border: Border::with_radius(style.rail.border_radius),
             ..renderer::Quad::default()
         },
-        style.rail.colors.1,
+        style.rail.colors.0,
     );
 
     // The right handle
@@ -685,7 +702,7 @@ pub fn draw<T, Theme, Renderer>(
             border: Border::with_radius(style.rail.border_radius),
             ..renderer::Quad::default()
         },
-        style.rail.colors.1,
+        style.rail.colors.0,
     );
 }
 
