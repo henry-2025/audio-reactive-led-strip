@@ -2,6 +2,7 @@ use std::fmt::Display;
 mod double_slider;
 
 use double_slider::DoubleSlider;
+use double_slider::SliderSide;
 use iced::widget::horizontal_space;
 use iced::widget::pick_list;
 use iced::widget::row;
@@ -40,8 +41,7 @@ impl Display for DisplayMode {
 #[derive(Debug, Clone, Copy)]
 pub enum GuiMessage {
     ModeSelected(DisplayMode),
-    LeftSlider(i32),
-    RightSlider(i32),
+    SliderUpdated((i32, SliderSide)),
 }
 
 pub struct Gui {
@@ -70,8 +70,8 @@ impl Sandbox for Gui {
             GuiMessage::ModeSelected(mode) => {
                 self.selected_mode = Some(mode);
             }
-            GuiMessage::LeftSlider(value) => self.left_slider = value,
-            GuiMessage::RightSlider(value) => self.right_slider = value,
+            GuiMessage::SliderUpdated((value, SliderSide::Left)) => self.left_slider = value,
+            GuiMessage::SliderUpdated((value, SliderSide::Right)) => self.right_slider = value,
         }
     }
 
@@ -86,7 +86,7 @@ impl Sandbox for Gui {
             0..=20000,
             self.left_slider,
             self.right_slider,
-            GuiMessage::LeftSlider,
+            GuiMessage::SliderUpdated,
         );
 
         let controls_bar = row![
