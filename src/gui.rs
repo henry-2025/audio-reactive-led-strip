@@ -1,12 +1,21 @@
-use std::fmt::Display;
 mod double_slider;
+mod waveform;
 
 use double_slider::DoubleSlider;
 use double_slider::SliderSide;
+pub use iced::application::Application;
 use iced::widget::horizontal_space;
 use iced::widget::pick_list;
 use iced::widget::row;
-use iced::{Alignment, Sandbox};
+use iced::window;
+use iced::Alignment;
+use iced::Command;
+use std::fmt::Display;
+use std::time::Instant;
+use waveform::pipeline::Vertex;
+use waveform::Waveform;
+
+use crate::config::Config;
 
 // TODO: add more modes and move this to a new module!
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,44 +47,85 @@ impl Display for DisplayMode {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum GuiMessage {
     ModeSelected(DisplayMode),
-    SliderUpdated((i32, SliderSide)),
+    SliderUpdated((u32, SliderSide)),
+    PointsUpdated(Vec<Vertex>),
+    Tick(Instant),
 }
 
 pub struct Gui {
+    waveform: Waveform,
     selected_mode: Option<DisplayMode>,
-    left_slider: i32,
-    right_slider: i32,
+    left_slider: u32,
+    right_slider: u32,
+    config: Config,
+    update_vertices: Option<Vec<Vertex>>,
 }
 
-impl Sandbox for Gui {
+impl Gui {
+    fn check_update(&mut self) {
+        match &self.update_vertices {
+            Some(vertex_updates) => {
+                self.waveform.update(vertex_updates.clone());
+                self.update_vertices = None;
+            }
+            None => (),
+        };
+    }
+
+    fn update_vertices(&mut self, new_vertices: Vec<Vertex>) {
+        self.update_vertices = Some(new_vertices)
+    }
+}
+
+impl Application for Gui {
+    type Executor = iced::executor::Default;
+
     type Message = GuiMessage;
 
-    fn new() -> Self {
-        Self {
-            selected_mode: Some(DisplayMode::Frequency),
-            left_slider: 0,
-            right_slider: 20000,
-        }
+    type Theme = iced_style::Theme;
+
+    type Flags = Flags;
+
+    fn new(flags: Self::Flags) -> (Self, iced::Command<Self::Message>) {
+        (
+            Self {
+                waveform: Waveform::new(),
+                selected_mode: Some(DisplayMode::Frequency),
+                left_slider: flags.config.left_slider_start,
+                right_slider: flags.config.right_slider_start,
+                config: flags.config,
+                update_vertices: None,
+            },
+            Command::none(),
+        )
     }
 
     fn title(&self) -> String {
         "Audio Reactive LED Strip".to_string()
     }
 
-    fn update(&mut self, message: Self::Message) {
+    fn update(&mut self, message: Self::Message) -> iced::Command<GuiMessage> {
         match message {
             GuiMessage::ModeSelected(mode) => {
                 self.selected_mode = Some(mode);
             }
-            GuiMessage::SliderUpdated((value, SliderSide::Left)) => self.left_slider = value,
-            GuiMessage::SliderUpdated((value, SliderSide::Right)) => self.right_slider = value,
-        }
+            GuiMessage::SliderUpdated((value, SliderSide::Left)) => {
+                self.left_slider = value;
+            }
+            GuiMessage::SliderUpdated((value, SliderSide::Right)) => {
+                self.right_slider = value;
+            }
+            //TODO: figure out wtf is going on here, how can we do renders and vertex updates separately?
+            GuiMessage::PointsUpdated(vertices) => self.update_vertices(vertices),
+            GuiMessage::Tick(time) => self.check_update(),
+        };
+        Command::none()
     }
 
-    fn view(&self) -> iced::Element<'_, Self::Message> {
+    fn view(&self) -> iced::Element<'_, Self::Message, Self::Theme, iced::Renderer> {
         let mode_select = pick_list(
             &DisplayMode::ALL[..],
             self.selected_mode,
@@ -83,7 +133,7 @@ impl Sandbox for Gui {
         );
 
         let slider = DoubleSlider::new(
-            0..=20000,
+            self.config.min_frequency..=self.config.max_frequency,
             self.left_slider,
             self.right_slider,
             GuiMessage::SliderUpdated,
@@ -100,5 +150,31 @@ impl Sandbox for Gui {
         .spacing(10);
 
         controls_bar.into()
+    }
+
+    fn theme(&self) -> Self::Theme {
+        Self::Theme::default()
+    }
+
+    fn style(&self) -> <Self::Theme as iced::application::StyleSheet>::Style {
+        <Self::Theme as iced::application::StyleSheet>::Style::default()
+    }
+
+    fn subscription(&self) -> iced::Subscription<Self::Message> {
+        window::frames().map(Self::Message::Tick)
+    }
+
+    fn scale_factor(&self) -> f64 {
+        1.0
+    }
+}
+
+pub struct Flags {
+    config: Config,
+}
+
+impl Into<Flags> for Config {
+    fn into(self) -> Flags {
+        Flags { config: self }
     }
 }

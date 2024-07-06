@@ -9,7 +9,7 @@ pub struct Config {
     pub device_port: u32,
     pub software_gamma_correction: bool,
     pub use_gui: bool,
-    pub n_pixels: u8,
+    pub n_points: u8,
     pub mic_rate: u32,
     pub fps: u32,
     pub min_frequency: u32,
@@ -17,6 +17,8 @@ pub struct Config {
     pub n_fft_bins: u32,
     pub n_rolling_history: u32,
     pub min_volume_threshold: f64,
+    pub left_slider_start: u32,
+    pub right_slider_start: u32,
 }
 
 impl Default for Config {
@@ -26,7 +28,7 @@ impl Default for Config {
             device_port: 7777,
             software_gamma_correction: true,
             use_gui: true,
-            n_pixels: 255,
+            n_points: 255,
             mic_rate: 44100,
             fps: 60,
             min_frequency: 200,
@@ -34,6 +36,8 @@ impl Default for Config {
             n_fft_bins: 24,
             n_rolling_history: 2,
             min_volume_threshold: 1e-7,
+            left_slider_start: 200,
+            right_slider_start: 20000,
         }
     }
 }
