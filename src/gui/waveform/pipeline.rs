@@ -1,8 +1,10 @@
+use buffer::Buffer;
 use iced::{widget::shader::wgpu, Rectangle};
+mod buffer;
 
 pub struct Pipeline {
     render_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
+    vertex_buffer: Buffer,
     num_vertices: u64,
 }
 
@@ -15,10 +17,16 @@ impl Pipeline {
         size: iced::Size<u32>,
     ) -> Self {
         //vertices of one cube
+        let vertex_buffer = Buffer::new(
+            device,
+            "vertex buffer",
+            std::mem::size_of::<Vertex>() as u64,
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
         let vertices = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vertex buffer"),
             usage: wgpu::BufferUsages::VERTEX,
-            mapped_at_creation: true,
+            mapped_at_creation: false,
             size: n_points,
         });
 
@@ -40,7 +48,7 @@ impl Pipeline {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[],
+                buffers: &[Vertex::desc()],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::LineStrip,
@@ -71,7 +79,7 @@ impl Pipeline {
 
         Self {
             render_pipeline: pipeline,
-            vertex_buffer: vertices,
+            vertex_buffer,
             num_vertices: n_points,
         }
     }
@@ -80,13 +88,16 @@ impl Pipeline {
         //TODO: see if we can resize vertex buffer if cubes amount changed
         // let new_size = num_points * std::mem::size_of::<Vertex>();
         // self.vertices.size(device, new_size as u64);
-        assert!(
-            self.vertex_buffer.size() == (vertices.len() * std::mem::size_of::<Vertex>()) as u64
-        );
+
+        let buf_len = (vertices.len() * std::mem::size_of::<Vertex>()) as u64;
+
+        if self.vertex_buffer.raw.size() != buf_len {
+            self.vertex_buffer.resize(device, buf_len);
+        }
 
         //always write new cube data since they are constantly rotating
         queue.write_buffer(
-            &self.vertex_buffer,
+            &self.vertex_buffer.raw,
             0,
             bytemuck::cast_slice(vertices.as_slice()),
         );
@@ -117,7 +128,7 @@ impl Pipeline {
 
             pass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
             pass.set_pipeline(&self.render_pipeline);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            pass.set_vertex_buffer(0, self.vertex_buffer.raw.slice(..));
             pass.draw(0..self.num_vertices as u32, 0..1);
         }
     }

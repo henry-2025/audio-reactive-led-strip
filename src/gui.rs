@@ -4,12 +4,15 @@ mod waveform;
 use double_slider::DoubleSlider;
 use double_slider::SliderSide;
 pub use iced::application::Application;
+use iced::widget::column;
 use iced::widget::horizontal_space;
 use iced::widget::pick_list;
 use iced::widget::row;
+use iced::widget::shader;
 use iced::window;
 use iced::Alignment;
 use iced::Command;
+use iced::Length;
 use std::fmt::Display;
 use std::time::Instant;
 use waveform::pipeline::Vertex;
@@ -149,7 +152,13 @@ impl Application for Gui {
         .align_items(Alignment::End)
         .spacing(10);
 
-        controls_bar.into()
+        let shader = shader(&self.waveform)
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        let display_and_controls = column![shader, controls_bar].height(600).spacing(10);
+
+        display_and_controls.into()
     }
 
     fn theme(&self) -> Self::Theme {
