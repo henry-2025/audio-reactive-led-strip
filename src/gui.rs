@@ -123,7 +123,7 @@ impl Application for Gui {
             }
             //TODO: figure out wtf is going on here, how can we do renders and vertex updates separately?
             GuiMessage::PointsUpdated(vertices) => self.update_vertices(vertices),
-            GuiMessage::Tick(time) => self.check_update(),
+            GuiMessage::Tick(_) => self.check_update(),
         };
         Command::none()
     }

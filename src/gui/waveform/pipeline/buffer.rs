@@ -28,6 +28,17 @@ impl Buffer {
         }
     }
 
+    pub fn update(
+        &mut self,
+        device: &wgpu::Device,
+        new_positions: Vec<f32>,
+        new_colors: Vec<Vec<u8>>,
+    ) {
+        // assert that the new_position and new_colors are the correct length
+
+        // update the current buffers with these new values
+    }
+
     pub fn resize(&mut self, device: &wgpu::Device, new_size: u64) {
         if new_size > self.size {
             self.raw = device.create_buffer(&wgpu::BufferDescriptor {

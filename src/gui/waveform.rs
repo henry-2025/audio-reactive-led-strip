@@ -23,7 +23,7 @@ impl Waveform {
         let mut scene = Self {
             size: 0.2,
             vertices: vec![],
-            background_color: Color::BLACK,
+            background_color: Color::GREEN,
         };
 
         scene.resize(config.n_points as usize);
