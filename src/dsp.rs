@@ -76,8 +76,8 @@ pub fn exec_rfft(buffer: &Array1<f64>, fft: &Arc<dyn Fft<f64>>) -> Array1<f64> {
  * mel\_x: the center frequencies of the mel bands
  */
 pub struct MelBank {
-    x: Array1<f64>,
-    y: Array2<f64>,
+    pub x: Array1<f64>,
+    pub y: Array2<f64>,
 }
 
 /**

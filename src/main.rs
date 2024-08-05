@@ -5,6 +5,7 @@ mod dsp;
 mod gamma_table;
 mod gui;
 mod led;
+mod run;
 
 use args::Args;
 use clap::Parser;
@@ -20,7 +21,7 @@ pub fn main() -> iced::Result {
     if config.use_gui {
         gui::Gui::run(iced::Settings::with_flags(config.into()))
     } else {
-        print!("default loop");
+Ok        print!("default loop");
         Ok(())
     }
 }
