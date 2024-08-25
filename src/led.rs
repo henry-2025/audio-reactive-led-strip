@@ -47,7 +47,7 @@ impl ESP8266Conn {
     pub fn update(
         &self,
         pixels: &mut Array2<u8>,
-        pixels_prev: &mut Array2<u8>,
+        pixels_prev: &Array2<u8>,
     ) -> Result<usize, io::Error> {
         // if the gamma table exists, map it to pixel array
         if let Some(gamma) = &self.gamma_table {

@@ -6,7 +6,7 @@ use cpal::{
 
 use crate::config::Config;
 
-pub fn new_audio_stream<D>(config: &Config, update_callback: D) -> Stream
+pub fn new_audio_stream<D>(config: Config, update_callback: D) -> Stream
 where
     D: FnMut(&[f64], &InputCallbackInfo) + Send + 'static,
 {
@@ -67,6 +67,6 @@ mod test {
     #[test]
     fn test_create_audio_stream() {
         fn test_callback(_: &[f64], _: &InputCallbackInfo) {}
-        new_audio_stream(&Config::default(), test_callback);
+        new_audio_stream(Config::default(), test_callback);
     }
 }

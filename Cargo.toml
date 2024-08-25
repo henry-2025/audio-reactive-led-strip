@@ -14,12 +14,12 @@ dirs = "5.0.1"
 iced = { version = "0.12.1", features = ["debug", "wgpu"] }
 iced_core = "0.12.3"
 iced_style = "0.12.1"
-ndarray = { version = "0.15.6", features = ["approx"] }
+ndarray = { version = "0.15.6", features = ["approx-0_5", "std"] }
 num-traits = "0.2.19"
 rustfft = "6.1.0"
 serde = { version = "1.0.194", features = ["derive"] }
 toml = { version = "0.8.8", features = ["parse"] }
 
 [dev-dependencies]
-ndarray-npy = "0.8.1"
+ndarray-npz = "0.1.0"
 ndarray-rand = "0.14.0"

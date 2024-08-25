@@ -136,7 +136,7 @@ impl Application for Gui {
         );
 
         let slider = DoubleSlider::new(
-            self.config.min_frequency..=self.config.max_frequency,
+            self.config.min_freq_hz..=self.config.max_freq_hz,
             self.left_slider,
             self.right_slider,
             GuiMessage::SliderUpdated,

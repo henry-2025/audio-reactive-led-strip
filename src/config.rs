@@ -10,7 +10,7 @@ use crate::args::Args;
 
 pub static DEFAULT_CONFIG_PATH: &str = ".config/audio-reactive-led-strip/config.toml";
 
-#[derive(Deserialize, Debug, PartialEq)]
+#[derive(Deserialize, Debug, PartialEq, Clone)]
 #[serde(default)]
 pub struct Config {
     pub device_ip: String,
@@ -20,8 +20,8 @@ pub struct Config {
     pub n_points: u8,
     pub mic_rate: u32,
     pub fps: u32,
-    pub min_frequency: u32,
-    pub max_frequency: u32,
+    pub min_freq_hz: u32,
+    pub max_freq_hz: u32,
     pub n_fft_bins: u32,
     pub n_rolling_history: u32,
     pub min_volume_threshold: f64,
@@ -39,8 +39,8 @@ impl Default for Config {
             n_points: 255,
             mic_rate: 44100,
             fps: 60,
-            min_frequency: 200,
-            max_frequency: 12000,
+            min_freq_hz: 200,
+            max_freq_hz: 12000,
             n_fft_bins: 24,
             n_rolling_history: 2,
             min_volume_threshold: 1e-7,
