@@ -54,19 +54,14 @@ impl Renderer {
         let config = state.lock().unwrap().config.clone();
         let frame_duration = Duration::from_secs_f64(1. / config.fps as f64);
 
-        // set buffer size to the nearest larger power of 2 for FFT
-        let buffer_size = 2_f32
-            .powi((config.mic_rate / config.fps) as i32)
-            .log2()
-            .ceil() as usize;
         Self {
             state,
-            rolling_history: Array1::zeros(buffer_size),
+            rolling_history: Array1::<f64>::zeros(config.n_fft_bins as usize),
             frame_duration,
             last_render: Instant::now() - frame_duration, // start rendering on our first sample
             config: config.clone(),
             conn: ESP8266Conn::new(&config).unwrap(),
-            dsp: Dsp::new(config, 0.2, 0.2),
+            dsp: Dsp::new(config),
         }
     }
 
@@ -88,9 +83,10 @@ impl Renderer {
                 if self.last_render.elapsed() > self.frame_duration {
                     self.last_render = Instant::now();
 
-                    let n = self.rolling_history.shape()[0] as u32;
+                    // transform the audio to the frequency space and then to the mel spectrum
                     let audio_data_rfft = self.dsp.exec_rfft(&self.rolling_history);
-                    let audio_data_mel = self.dsp.get_mel_repr(&audio_data_rfft);
+                    let mut audio_data_mel = self.dsp.get_mel_repr(&audio_data_rfft);
+                    self.dsp.gain_and_smooth(&mut audio_data_mel);
 
                     let new_display_buffer: Array2<f64> = self
                         .dsp

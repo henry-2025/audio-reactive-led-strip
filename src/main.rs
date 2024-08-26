@@ -7,7 +7,11 @@ mod gui;
 mod led;
 mod renderer;
 
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
+};
 
 use args::Args;
 use clap::Parser;
@@ -27,6 +31,7 @@ pub fn main() -> iced::Result {
         gui::Gui::run(iced::Settings::with_flags(config.into()))
     } else {
         renderer.main_loop();
+        thread::sleep(Duration::from_secs(10));
         Ok(())
     }
 }

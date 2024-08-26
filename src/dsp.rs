@@ -33,10 +33,10 @@ pub struct Dsp {
     gaussian_kernel1: Array1<f64>,
     gaussian_kernel2: Array1<f64>,
     mel_bank: MelBank,
+    mel_gain: ExpFilterArr<Ix1>,
+    mel_smoothing: ExpFilterArr<Ix1>,
     fft: Arc<dyn Fft<f64>>,
     config: Config,
-    alpha_decay: f64,
-    alpha_rise: f64,
 }
 
 #[derive(Clone)]
@@ -47,34 +47,33 @@ pub enum Preset {
 }
 
 impl Dsp {
-    pub fn new(config: Config, alpha_rise: f64, alpha_decay: f64) -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
-            gain: ExpFilterArr::<Ix1>::new(
-                (config.n_points / 2) as u32,
-                0.01,
-                alpha_rise,
-                alpha_decay,
-            ),
+            gain: ExpFilterArr::<Ix1>::new((config.n_mel_bands) as u32, 0.01, 0.2, 0.2),
             p_filt: ExpFilterArr::<Ix2>::new((config.n_points / 2) as u32, 1., 0.99, 0.1),
-            common_mode: ExpFilterArr::<Ix1>::new((config.n_points / 2) as u32, 0.01, 0.99, 0.01),
+            common_mode: ExpFilterArr::<Ix1>::new(
+                (config.n_mel_bands / 2) as u32,
+                0.01,
+                0.99,
+                0.01,
+            ),
             r_filt: ExpFilterArr::<Ix1>::new((config.n_points / 2) as u32, 0.01, 0.2, 0.99),
             g_filt: ExpFilterArr::<Ix1>::new((config.n_points / 2) as u32, 0.01, 0.05, 0.3),
             b_filt: ExpFilterArr::<Ix1>::new((config.n_points / 2) as u32, 0.01, 0.1, 0.5),
-            prev_spectrum: Array1::zeros(config.n_points as usize),
+            prev_spectrum: Array1::zeros(config.n_mel_bands as usize),
             gaussian_kernel1: gaussian_kernel(0.2, 0, 1), // TODO: determine whether radius 1 is what we want
             gaussian_kernel2: gaussian_kernel(0.4, 0, 1), // TODO: determine whether radius 1 is what we want
             mel_bank: create_mel_bank(
                 config.mic_rate,
-                config.n_rolling_history,
-                config.fps,
                 config.n_fft_bins,
+                config.n_mel_bands,
                 config.min_freq_hz,
                 config.max_freq_hz,
             ),
+            mel_gain: ExpFilterArr::<Ix1>::new(config.n_mel_bands, 0.1, 0.01, 0.99),
+            mel_smoothing: ExpFilterArr::<Ix1>::new(config.n_mel_bands, 0.1, 0.5, 0.99),
             fft: new_rfft(config.n_fft_bins),
             config,
-            alpha_decay,
-            alpha_rise,
         }
     }
     pub fn apply_transform(
@@ -90,27 +89,7 @@ impl Dsp {
     }
 
     fn visualize_scroll(&mut self, display_buffer: &mut Array2<f64>) -> Array2<f64> {
-        /*
-        global p
-            y = y**2.0
-            gain.update(y)
-            y /= gain.value
-            y *= 255.0
-            r = int(np.max(y[:len(y) // 3]))
-            g = int(np.max(y[len(y) // 3: 2 * len(y) // 3]))
-            b = int(np.max(y[2 * len(y) // 3:]))
-            # Scrolling effect window
-            p[:, 1:] = p[:, :-1]
-            p *= 0.98
-            p = gaussian_filter1d(p, sigma=0.2)
-            # Create new color originating at the center
-            p[0, 0] = r
-            p[1, 0] = g
-            p[2, 0] = b
-            # Update the LED strip
-            return np.concatenate((p[:, ::-1], p), axis=1)
-        */
-        let y = &mut self.mel_bank.x;
+        let mut y = self.mel_smoothing.current.clone();
         // y = y**2.0
         y.map_inplace(|x| *x = x.powi(2));
         // update gain
@@ -149,7 +128,7 @@ impl Dsp {
         ]
     }
     fn visualize_power(&mut self, display_buffer: &mut Array2<f64>) -> Array2<f64> {
-        let mut y = self.mel_bank.x.clone();
+        let mut y = self.mel_smoothing.current.clone();
         self.gain.update(&y);
 
         // y /= gain.value
@@ -179,7 +158,7 @@ impl Dsp {
     }
     fn visualize_spectrum(&mut self, _: &mut Array2<f64>) -> Array2<f64> {
         // TODO: need to do interpolation up here?
-        let mut y = self.mel_bank.x.clone();
+        let y = self.mel_smoothing.current.clone();
         self.common_mode.update(&y);
         //diff = y - self.prev_spectrum
         let diff = &y - &self.prev_spectrum;
@@ -211,13 +190,24 @@ impl Dsp {
             .to_owned()
     }
 
+    pub fn gain_and_smooth(&mut self, mel: &mut Array1<f64>) {
+        mel.map_mut(|x| *x = x.powi(2));
+        let filtered_mel = self.gaussian_filter1d_single(mel);
+        self.mel_gain.update(&filtered_mel);
+        mel.zip_mut_with(&self.mel_gain.current, |m, g| *m /= g);
+        self.mel_smoothing.update(mel);
+    }
+
     pub fn get_mel_repr(&self, audio: &Array1<f64>) -> Array1<f64> {
         self.mel_bank.y.dot(audio)
     }
 
-    pub fn gaussian_filter1d(&self, input: &Array2<f64>) -> Array2<f64> {
-        println!("{:?}", &self.gaussian_kernel1.slice(s![..;-1]).to_owned());
+    fn gaussian_filter1d(&self, input: &Array2<f64>) -> Array2<f64> {
         correlate_1d(input, &self.gaussian_kernel1.slice(s![..;-1]).to_owned())
+    }
+
+    fn gaussian_filter1d_single(&self, input: &Array1<f64>) -> Array1<f64> {
+        correlate_1d_single(input, &self.gaussian_kernel1.slice(s![..;-1]).to_owned())
     }
 }
 
@@ -334,26 +324,22 @@ pub struct MelBank {
 */
 pub fn create_mel_bank(
     mic_rate: u32,
-    n_rolling_history: u32,
-    fps: u32,
     n_fft_bins: u32,
+    n_mel_bands: u32,
     min_freq_hz: u32,
     max_freq_hz: u32,
 ) -> MelBank {
-    let num_fft_bands = (mic_rate * n_rolling_history) as f64 / (2.0 * fps as f64);
-    let num_mel_bands = n_fft_bins as usize; // bands and bins are different quantities
-
     // generate centerfrequencies and band eges for a mel filter bank
     let max_freq_mel = hertz_to_mel(max_freq_hz as f64);
     let min_freq_mel = hertz_to_mel(min_freq_hz as f64);
-    let delta_mel = (max_freq_mel - min_freq_mel).abs() / (num_mel_bands as f64 + 1.0);
+    let delta_mel = (max_freq_mel - min_freq_mel).abs() / (n_mel_bands as f64 + 1.0);
     let frequencies_mel =
-        Array1::from_iter((0..num_mel_bands + 2).map(|i| i as f64)) * delta_mel + min_freq_mel;
+        Array1::from_iter((0..n_mel_bands + 2).map(|i| i as f64)) * delta_mel + min_freq_mel;
     let frequencies_hz = frequencies_mel.map(|mel| mel_to_hertz(*mel));
 
     // build the mel input scale and transformation matrix
-    let mel_x = ndarray::Array1::linspace(0., mic_rate as f64 / 2.0, num_fft_bands as usize);
-    let mel_y = Array2::from_shape_fn((num_mel_bands, num_fft_bands as usize), |(i, j)| {
+    let mel_x = ndarray::Array1::linspace(0., mic_rate as f64 / 2.0, n_fft_bins as usize);
+    let mel_y = Array2::from_shape_fn((n_mel_bands as usize, n_fft_bins as usize), |(i, j)| {
         let (lower, center, upper) = (
             frequencies_hz[i],
             frequencies_hz[i + 1],
@@ -407,6 +393,25 @@ fn gaussian_kernel(sigma: f64, order: u32, radius: u32) -> Array1<f64> {
     &q.slice(s![.., 0]) * &phi_x
 }
 
+fn correlate_1d_single(arr: &Array1<f64>, kern: &Array1<f64>) -> Array1<f64> {
+    let mut output = Array1::<f64>::zeros((arr.shape()[0]));
+    // extend arr by mirroring the ends
+    let left_padding = kern.shape()[0] / 2;
+    let right_padding = left_padding - 1 + (kern.shape()[0] % 2);
+    let right_extension = arr.slice(s![arr.shape()[0] - right_padding..; -1]);
+    let left_extension = arr.slice(s![..left_padding; -1]);
+    let array_extended = ndarray::concatenate![Axis(0), left_extension, *arr, right_extension];
+    let kern = kern.slice(s![.., NewAxis]);
+
+    array_extended
+        .axis_windows(Axis(0), kern.len())
+        .into_iter()
+        .enumerate()
+        .for_each(|(i, w)| {
+            output[i] = w.dot(&kern)[0];
+        });
+    output
+}
 fn correlate_1d(arr: &Array2<f64>, kern: &Array1<f64>) -> Array2<f64> {
     let mut output = Array2::zeros((arr.shape()[0], arr.shape()[1]));
     // extend arr by mirroring the ends
@@ -461,7 +466,7 @@ mod test_dsp_functions {
         let mut config = Config::default();
         config.n_fft_bins = 16;
 
-        let dsp = Dsp::new(config, 0.2, 0.2);
+        let dsp = Dsp::new(config);
 
         let input1 = arr1(&[
             1.18550208,
@@ -513,6 +518,25 @@ mod test_dsp_functions {
         assert_abs_diff_eq!(output1, expected1, epsilon = epsilon);
         let output2 = dsp.exec_rfft(&input2);
         assert_abs_diff_eq!(output2, expected2, epsilon = epsilon);
+    }
+
+    #[test]
+    fn test_get_mel_repr() {
+        let mut config = Config::default();
+        config.n_fft_bins = 16;
+        config.n_mel_bands = 8;
+        let dsp = Dsp::new(config);
+
+        let input = arr1(&[
+            0.59944508, 0.35953482, 0.43607555, 1.81651546, 0.05219176, 0.06467918, 0.91489904,
+            0.32199603, 0.24770591, 1.36049556, 0.3612345, 1.24795475, 0.63443764, 1.6687458,
+            1.33319364, 0.55696517,
+        ]);
+
+        let expected = arr1(&[
+            0., 0.00314753, 0.35638729, 0.12078571, 0.51270242, 1.63282723, 0.07639316, 1.11434329,
+        ]);
+        assert_abs_diff_eq!(dsp.get_mel_repr(&input), expected, epsilon = 1e-5);
     }
 
     #[test]
@@ -585,7 +609,7 @@ mod test_dsp_functions {
             ],
         ]);
 
-        let dsp = Dsp::new(Config::default(), 0.2, 0.2);
+        let dsp = Dsp::new(Config::default());
         assert_abs_diff_eq!(
             dsp.gaussian_filter1d(&input),
             expected_output,
@@ -629,7 +653,7 @@ mod test_dsp_functions {
 
     #[test]
     fn test_create_mel_bank() {
-        let output = create_mel_bank(44100, 2, 60, 24, 200, 12000);
+        let output = create_mel_bank(44100, 735, 24, 200, 12000);
         let mut npz_reader = NpzReader::new(File::open("./test/mel_test.npz").unwrap()).unwrap();
 
         let expected = MelBank {
@@ -645,7 +669,7 @@ mod test_dsp_functions {
 
 #[cfg(test)]
 mod test_display_funcs {
-    use ndarray::arr2;
+    use ndarray::{arr1, arr2};
 
     use crate::config::Config;
 
@@ -754,13 +778,21 @@ mod test_display_funcs {
         [-2.31363675e+02, 3.33496981e+02, -3.29107139e+02],
     ];
 
+    const MEL_UPDATE: [f64; 16] = [
+        0.59944508, 0.35953482, 0.43607555, 1.81651546, 0.05219176, 0.06467918, 0.91489904,
+        0.32199603, 0.24770591, 1.36049556, 0.3612345, 1.24795475, 0.63443764, 1.6687458,
+        1.33319364, 0.55696517,
+    ];
+
     #[test]
     fn test_display_scroll() {
         let mut display_buffer = arr2(&DISPLAY_BUFFER);
         let mut config = Config::default();
         config.n_points = display_buffer.shape()[0] as u8;
+        config.n_mel_bands = 16;
 
-        let mut dsp = Dsp::new(config, 0.2, 0.2);
+        let mut dsp = Dsp::new(config);
+        dsp.gain_and_smooth(&mut arr1(&MEL_UPDATE));
 
         dsp.apply_transform(super::Preset::Scroll, &mut display_buffer);
     }

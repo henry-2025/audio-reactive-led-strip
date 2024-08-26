@@ -23,8 +23,8 @@ pub struct Config {
     pub min_freq_hz: u32,
     pub max_freq_hz: u32,
     pub n_fft_bins: u32,
-    pub n_rolling_history: u32, // TODO: depricate this field in favor of rolling_history_millis
-    pub rolling_history_millis: u32,
+    pub n_mel_bands: u32,
+    pub rolling_history_millis: u32, // TODO: determine whether or not this can be removed
     pub min_volume_threshold: f64,
     pub left_slider_start: u32,
     pub right_slider_start: u32,
@@ -42,8 +42,8 @@ impl Default for Config {
             fps: 60,
             min_freq_hz: 200,
             max_freq_hz: 12000,
-            n_fft_bins: 24,
-            n_rolling_history: 2,
+            n_fft_bins: 2048,
+            n_mel_bands: 24,
             rolling_history_millis: 50,
             min_volume_threshold: 1e-7,
             left_slider_start: 200,
