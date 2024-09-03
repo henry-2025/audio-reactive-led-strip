@@ -3,15 +3,12 @@ mod audio;
 mod config;
 mod dsp;
 mod gamma_table;
+#[cfg(feature = "gui")]
 mod gui;
 mod led;
 mod renderer;
 
-use std::{
-    sync::{Arc, Mutex},
-    thread,
-    time::Duration,
-};
+use std::sync::{mpsc, Arc, Mutex};
 
 use args::Args;
 use clap::Parser;
@@ -27,11 +24,21 @@ pub fn main() -> iced::Result {
     let render_state = Arc::new(Mutex::new(SharedRenderState::new(&config)));
     let renderer = Renderer::new(render_state.clone());
 
-    if config.use_gui {
-        gui::Gui::run(iced::Settings::with_flags(config.into()))
-    } else {
-        renderer.main_loop();
-        thread::sleep(Duration::from_secs(10));
-        Ok(())
+    #[cfg(feature = "gui")]
+    {
+        return gui::Gui::run(iced::Settings::with_flags(config.into()));
+    }
+
+    #[cfg(feature = "cli")]
+    {
+        let (tx, rx) = mpsc::channel();
+
+        ctrlc::set_handler(move || {
+            println!("Ctrl+C received, signaling stop");
+            tx.send(()).unwrap();
+        })
+        .expect("error setting up signal handler");
+        renderer.main_loop(rx);
+        return Ok(());
     }
 }

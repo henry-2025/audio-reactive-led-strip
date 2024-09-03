@@ -10,6 +10,7 @@ approx = "0.5.1"
 bytemuck = "1.16.1"
 clap = { version = "4.5.13", features = ["derive"] }
 cpal = "0.15.2"
+ctrlc = "3.4.5"
 dirs = "5.0.1"
 iced = { version = "0.12.1", features = ["debug", "wgpu"] }
 iced_core = "0.12.3"
@@ -23,3 +24,8 @@ toml = { version = "0.8.8", features = ["parse"] }
 [dev-dependencies]
 ndarray-npz = "0.1.0"
 ndarray-rand = "0.14.0"
+
+[features]
+default = ["cli"]
+cli = []
+gui = []

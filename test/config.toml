@@ -2,7 +2,6 @@
 device_ip = "192.168.0.150"
 device_port = 7777
 software_gamma_correction = true
-use_gui = false
 n_pixels = 255
 mic_rate = 44100
 fps = 60

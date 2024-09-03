@@ -15,7 +15,6 @@ pub static DEFAULT_CONFIG_PATH: &str = ".config/audio-reactive-led-strip/config.
 pub struct Config {
     pub device_ip: String,
     pub device_port: u32,
-    pub use_gui: bool,
     pub software_gamma_correction: bool,
     pub n_points: u8,
     pub mic_rate: u32,
@@ -36,7 +35,6 @@ impl Default for Config {
             device_ip: String::from("192.168.0.150"),
             device_port: 7777,
             software_gamma_correction: true,
-            use_gui: false,
             n_points: 255,
             mic_rate: 44100,
             fps: 60,
@@ -54,7 +52,6 @@ impl Default for Config {
 
 impl Config {
     pub fn merge_with_args(&mut self, args: Args) {
-        self.use_gui |= args.use_gui;
         if let Some(device_ip) = args.device_ip {
             self.device_ip = device_ip
         }

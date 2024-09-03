@@ -1,5 +1,5 @@
 use std::{
-    sync::{Arc, Mutex},
+    sync::{mpsc, Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -65,7 +65,7 @@ impl Renderer {
         }
     }
 
-    pub fn main_loop(mut self) {
+    pub fn main_loop(mut self, stop: mpsc::Receiver<()>) {
         let stream = new_audio_stream(
             self.config,
             move |audio_data: &[f32], info: &InputCallbackInfo| {
@@ -116,5 +116,7 @@ impl Renderer {
             },
         );
         stream.play().unwrap();
+        stop.recv();
+        println!("TODO: remove me, shutting down channel!");
     }
 }
