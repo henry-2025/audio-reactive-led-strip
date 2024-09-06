@@ -1,4 +1,6 @@
+use std::io::Write;
 use std::{
+    fs::File,
     sync::{mpsc, Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -20,8 +22,8 @@ pub enum Changed {
 }
 
 pub struct SharedRenderState {
-    display_buffer: Array2<f64>,
-    display_buffer_quantized: Array2<u8>,
+    display_values: Array2<f64>,
+    send_buffer: Array2<u8>,
     config: Config,
     selected_preset: dsp::Preset,
     changes: Vec<Changed>,
@@ -31,8 +33,8 @@ impl SharedRenderState {
     pub fn new(config: &Config) -> Self {
         Self {
             config: config.clone(),
-            display_buffer: Array2::<f64>::zeros((config.n_points as usize, 3)),
-            display_buffer_quantized: Array2::<u8>::zeros((config.n_points as usize, 3)),
+            display_values: Array2::<f64>::zeros((config.n_points as usize, 3)),
+            send_buffer: Array2::<u8>::zeros((config.n_points as usize, 3)),
             selected_preset: dsp::Preset::Scroll,
             changes: Vec::new(),
         }
@@ -66,6 +68,7 @@ impl Renderer {
     }
 
     pub fn main_loop(mut self, stop: mpsc::Receiver<()>) {
+        let mut data_file = File::create("tmp.txt").unwrap();
         let stream = new_audio_stream(
             self.config,
             move |audio_data: &[f32], info: &InputCallbackInfo| {
@@ -88,35 +91,30 @@ impl Renderer {
                     let mut audio_data_mel = self.dsp.get_mel_repr(&audio_data_rfft);
                     self.dsp.gain_and_smooth(&mut audio_data_mel);
 
-                    let new_display_buffer: Array2<f64> = self
-                        .dsp
-                        .apply_transform(state.selected_preset.clone(), &mut state.display_buffer);
+                    self.dsp.apply_transform_inplace(
+                        state.selected_preset.clone(),
+                        &mut state.display_values,
+                    );
 
-                    let mut new_display_buffer_quantized: Array2<u8> =
-                        new_display_buffer.map(|v| {
-                            if *v < 0.0 {
-                                0
-                            } else if *v > 255.0 {
-                                255
-                            } else {
-                                *v as u8
-                            }
-                        });
+                    let mut new_send_buffer: Array2<u8> = state.display_values.map(|v| {
+                        if *v < 0.0 {
+                            0
+                        } else if *v > 255.0 {
+                            255
+                        } else {
+                            *v as u8
+                        }
+                    });
 
                     self.conn
-                        .update(
-                            &mut new_display_buffer_quantized,
-                            &state.display_buffer_quantized,
-                        )
+                        .update(&mut new_send_buffer, &state.send_buffer)
                         .expect("error updating connection");
 
-                    state.display_buffer_quantized = new_display_buffer_quantized;
-                    state.display_buffer = new_display_buffer;
+                    state.send_buffer = new_send_buffer;
                 }
             },
         );
-        stream.play().unwrap();
-        stop.recv();
-        println!("TODO: remove me, shutting down channel!");
+        stream.play().expect("error playing audio stream");
+        stop.recv().expect("error accepting thread stop signal");
     }
 }

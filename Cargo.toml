@@ -28,4 +28,3 @@ ndarray-rand = "0.14.0"
 [features]
 default = ["cli"]
 cli = []
-gui = []

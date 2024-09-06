@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ndarray::{s, Array, Array1, Array2, Axis, Dimension, Ix1, Ix2, NewAxis};
+use ndarray::{s, Array, Array1, Array2, Axis, Dimension, Ix1, Ix2, NewAxis, Shape};
 use rustfft::{
     num_complex::{Complex64, ComplexFloat},
     Fft, FftPlanner,
@@ -49,46 +49,50 @@ pub enum Preset {
 impl Dsp {
     pub fn new(config: Config) -> Self {
         Self {
-            gain: ExpFilterArr::<Ix1>::new((config.n_mel_bands) as u32, 0.01, 0.2, 0.2),
-            p_filt: ExpFilterArr::<Ix2>::new((config.n_points / 2) as u32, 1., 0.99, 0.1),
+            gain: ExpFilterArr::<Ix1>::new(config.n_mel_bands as usize, 0.01, 0.2, 0.2),
+            p_filt: ExpFilterArr::<Ix2>::new(
+                (config.n_points / 2 + config.n_points % 2) as usize,
+                1.,
+                0.99,
+                0.1,
+            ),
             common_mode: ExpFilterArr::<Ix1>::new(
-                (config.n_mel_bands / 2) as u32,
+                (config.n_mel_bands / 2) as usize,
                 0.01,
                 0.99,
                 0.01,
             ),
-            r_filt: ExpFilterArr::<Ix1>::new((config.n_points / 2) as u32, 0.01, 0.2, 0.99),
-            g_filt: ExpFilterArr::<Ix1>::new((config.n_points / 2) as u32, 0.01, 0.05, 0.3),
-            b_filt: ExpFilterArr::<Ix1>::new((config.n_points / 2) as u32, 0.01, 0.1, 0.5),
+            r_filt: ExpFilterArr::<Ix1>::new((config.n_points / 2) as usize, 0.01, 0.2, 0.99),
+            g_filt: ExpFilterArr::<Ix1>::new((config.n_points / 2) as usize, 0.01, 0.05, 0.3),
+            b_filt: ExpFilterArr::<Ix1>::new((config.n_points / 2) as usize, 0.01, 0.1, 0.5),
             prev_spectrum: Array1::zeros(config.n_mel_bands as usize),
             gaussian_kernel1: gaussian_kernel(0.2, 0, 1), // TODO: determine whether radius 1 is what we want
             gaussian_kernel2: gaussian_kernel(0.4, 0, 1), // TODO: determine whether radius 1 is what we want
             mel_bank: create_mel_bank(
                 config.mic_rate,
-                config.n_fft_bins,
+                config.n_fft_bins / 2,
                 config.n_mel_bands,
                 config.min_freq_hz,
                 config.max_freq_hz,
             ),
-            mel_gain: ExpFilterArr::<Ix1>::new(config.n_mel_bands, 0.1, 0.01, 0.99),
-            mel_smoothing: ExpFilterArr::<Ix1>::new(config.n_mel_bands, 0.1, 0.5, 0.99),
+            mel_gain: ExpFilterArr::<Ix1>::new(config.n_mel_bands as usize, 0.1, 0.01, 0.99),
+            mel_smoothing: ExpFilterArr::<Ix1>::new(config.n_mel_bands as usize, 0.1, 0.5, 0.99),
             fft: new_rfft(config.n_fft_bins),
             config,
         }
     }
-    pub fn apply_transform(
-        &mut self,
-        preset: Preset,
-        display_buffer: &mut Array2<f64>,
-    ) -> Array2<f64> {
+    pub fn apply_transform_inplace(&mut self, preset: Preset, display_values: &mut Array2<f64>) {
         match preset {
-            Preset::Scroll => self.visualize_scroll(display_buffer),
-            Preset::Power => self.visualize_power(display_buffer),
-            Preset::Spectrum => self.visualize_spectrum(display_buffer),
-        }
+            Preset::Scroll => self.visualize_scroll(display_values),
+            Preset::Power => self.visualize_power(display_values),
+            Preset::Spectrum => self.visualize_spectrum(display_values),
+        };
     }
 
-    fn visualize_scroll(&mut self, display_buffer: &mut Array2<f64>) -> Array2<f64> {
+    fn visualize_scroll(&mut self, display_values: &mut Array2<f64>) {
+        let mut display_slice = display_values
+            .slice(s![(self.config.n_points / 2) as usize.., ..])
+            .to_owned();
         let mut y = self.mel_smoothing.current.clone();
         // y = y**2.0
         y.map_inplace(|x| *x = x.powi(2));
@@ -99,15 +103,14 @@ impl Dsp {
         y.zip_mut_with(&self.gain.current, |y, g| *y = 255.0 * (*y) / g);
 
         // scrolling effect
-        // p[:, 1:] = p[:, :-1]
+        // p[1:, :] = p[:-1, :]
         // p *= 0.98
-        for i in 1..y.shape()[0] - 1 {
-            for j in 0..3 {
-                display_buffer[[i, j]] = display_buffer[[i - 1, j]] * 0.98;
-            }
+        for i in 1..display_slice.shape()[0] - 1 {
+            let left_pixels = display_slice.slice(s![i - 1, ..]).to_owned() * 0.98;
+            display_slice.slice_mut(s![i, ..]).assign(&left_pixels);
         }
         // apply gaussian filter
-        let mut filter_display_buffer = correlate_1d(display_buffer, &self.gaussian_kernel1);
+        let mut filter_display_buffer = correlate_1d(&display_slice, &self.gaussian_kernel1);
 
         // create one new color originating at the center
         for i in 0..3 {
@@ -121,20 +124,23 @@ impl Dsp {
         }
 
         // scroll display
-        ndarray::concatenate![
+        display_values.assign(&ndarray::concatenate![
             Axis(0),
+            filter_display_buffer.slice(s![(self.config.n_points % 2) as usize..,..;-1]),
             filter_display_buffer,
-            filter_display_buffer.slice(s![..,..;-1])
-        ]
+        ]);
     }
-    fn visualize_power(&mut self, display_buffer: &mut Array2<f64>) -> Array2<f64> {
+    fn visualize_power(&mut self, display_values: &mut Array2<f64>) {
         let mut y = self.mel_smoothing.current.clone();
         self.gain.update(&y);
+        let mut display_slice = display_values
+            .slice(s![(self.config.n_points / 2) as usize.., ..])
+            .to_owned();
 
         // y /= gain.value
         // y *= float(config.n_pixels // 2) - 1)
         y.zip_mut_with(&self.gain.current, |y, g| {
-            *y = ((self.config.n_points / 2) - 1) as f64 * (*y)
+            *y *= ((self.config.n_points / 2) - 1) as f64 / g;
         });
 
         // map color channels according to energy in different frequency bands
@@ -144,19 +150,24 @@ impl Dsp {
                 .slice(s![i * y.shape()[0] / 3..(i + 1) * y.shape()[0] / 3])
                 .map(|x| x.powf(scale));
             let mean = s.mean().unwrap() as usize;
-            display_buffer.slice_mut(s![i, ..mean]).fill(255.0);
-            display_buffer.slice_mut(s![i, mean..]).fill(0.0);
+            println!("{}", mean);
+            display_slice.slice_mut(s![..mean, i]).fill(255.0);
+            display_slice.slice_mut(s![mean.., i]).fill(0.0);
         }
 
-        self.p_filt.update(display_buffer);
-        display_buffer.map_inplace(|x| {
+        self.p_filt.update(&display_slice);
+        display_slice.map_inplace(|x| {
             *x = x.round();
         });
-        display_buffer.assign(&correlate_1d(display_buffer, &self.gaussian_kernel2));
+        display_slice.assign(&correlate_1d(&display_slice, &self.gaussian_kernel2));
 
-        return ndarray::concatenate![Axis(0), display_buffer.slice(s![..,..;-1]), *display_buffer];
+        display_values.assign(&ndarray::concatenate![
+            Axis(0),
+            display_slice.slice(s![(self.config.n_points % 2) as usize..,..;-1]),
+            display_slice
+        ]);
     }
-    fn visualize_spectrum(&mut self, _: &mut Array2<f64>) -> Array2<f64> {
+    fn visualize_spectrum(&mut self, display_buffer: &mut Array2<f64>) {
         // TODO: need to do interpolation up here?
         let y = self.mel_smoothing.current.clone();
         self.common_mode.update(&y);
@@ -176,7 +187,7 @@ impl Dsp {
         let g = ndarray::concatenate![Axis(0), g.slice(s![..;-1]), g];
         let b = ndarray::concatenate![Axis(0), b.slice(s![..;-1]).to_owned(), b.to_owned()];
 
-        ndarray::stack![Axis(0), r, g, b]
+        display_buffer.assign(&ndarray::stack![Axis(0), r, g, b]);
     }
 
     pub fn exec_rfft(&self, buffer: &Array1<f64>) -> Array1<f64> {
@@ -241,15 +252,15 @@ where
 }
 
 impl ExpFilterArr<Ix2> {
-    pub fn new(size: u32, init: f64, alpha_rise: f64, alpha_decay: f64) -> Self {
+    pub fn new(size: usize, init: f64, alpha_rise: f64, alpha_decay: f64) -> Self {
         Self {
-            current: Array::<f64, Ix2>::ones((3, size as usize)) * init,
+            current: Array::<f64, Ix2>::ones((size, 3)) * init,
             alpha_rise,
             alpha_decay,
         }
     }
     pub fn update(&mut self, new: &Array2<f64>) {
-        assert_eq!(self.current.len(), new.len());
+        assert_eq!(self.current.shape(), new.shape());
         self.current.indexed_iter_mut().for_each(|(i, c)| {
             let alpha = if new[i] - *c > 0.0 {
                 self.alpha_rise
@@ -262,9 +273,9 @@ impl ExpFilterArr<Ix2> {
 }
 
 impl ExpFilterArr<Ix1> {
-    pub fn new(size: u32, init: f64, alpha_rise: f64, alpha_decay: f64) -> Self {
+    pub fn new(size: usize, init: f64, alpha_rise: f64, alpha_decay: f64) -> Self {
         Self {
-            current: Array::<f64, Ix1>::ones(size as usize) * init,
+            current: Array::<f64, Ix1>::ones(size) * init,
             alpha_rise,
             alpha_decay,
         }
@@ -794,6 +805,6 @@ mod test_display_funcs {
         let mut dsp = Dsp::new(config);
         dsp.gain_and_smooth(&mut arr1(&MEL_UPDATE));
 
-        dsp.apply_transform(super::Preset::Scroll, &mut display_buffer);
+        dsp.apply_transform_inplace(super::Preset::Scroll, &mut display_buffer);
     }
 }
