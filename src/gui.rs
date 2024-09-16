@@ -1,24 +1,35 @@
 mod double_slider;
-mod waveform;
+pub mod waveform;
 
+use clap::Parser;
 use double_slider::DoubleSlider;
 use double_slider::SliderSide;
-pub use iced::application::Application;
-use iced::widget::column;
-use iced::widget::horizontal_space;
-use iced::widget::pick_list;
-use iced::widget::row;
-use iced::widget::shader;
+use iced::futures::channel::mpsc;
+use iced::futures::channel::mpsc::Receiver;
+use iced::futures::channel::mpsc::Sender;
+use iced::futures::SinkExt;
 use iced::window;
-use iced::Alignment;
-use iced::Command;
-use iced::Length;
+use iced::{
+    futures::Stream,
+    widget::{column, horizontal_space, pick_list, row, shader},
+};
+use iced::{Alignment, Length, Subscription};
+use ndarray::Array2;
 use std::fmt::Display;
+use std::sync;
+use std::thread;
+use std::thread::JoinHandle;
 use std::time::Instant;
 use waveform::pipeline::Vertex;
 use waveform::Waveform;
 
+use crate::args::Args;
+use crate::config::load_config;
 use crate::config::Config;
+use crate::config::DEFAULT_CONFIG_PATH;
+use crate::renderer::Renderer;
+
+const CHAN_BUF_SIZE: usize = 1;
 
 // TODO: add more modes and move this to a new module!
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -56,6 +67,8 @@ pub enum GuiMessage {
     SliderUpdated((u32, SliderSide)),
     PointsUpdated(Vec<Vertex>),
     Tick(Instant),
+    StopTx(sync::mpsc::Sender<()>),
+    WindowClose(window::Id),
 }
 
 pub struct Gui {
@@ -65,6 +78,12 @@ pub struct Gui {
     right_slider: u32,
     config: Config,
     update_vertices: Option<Vec<Vertex>>,
+    gui_tx: Sender<GuiMessage>,
+    gui_rx: Receiver<GuiMessage>,
+    renderer_rx: Option<Receiver<GuiMessage>>,
+    stop_tx: Option<sync::mpsc::Sender<()>>,
+    display_buffer_tx: Sender<Array2<u8>>,
+    display_buffer_rx: Receiver<Array2<u8>>,
 }
 
 impl Gui {
@@ -83,34 +102,27 @@ impl Gui {
     }
 }
 
-impl Application for Gui {
-    type Executor = iced::executor::Default;
-
-    type Message = GuiMessage;
-
-    type Theme = iced_style::Theme;
-
-    type Flags = Flags;
-
-    fn new(flags: Self::Flags) -> (Self, iced::Command<Self::Message>) {
-        (
-            Self {
-                waveform: Waveform::new(),
-                selected_mode: Some(DisplayMode::Frequency),
-                left_slider: flags.config.left_slider_start,
-                right_slider: flags.config.right_slider_start,
-                config: flags.config,
-                update_vertices: None,
-            },
-            Command::none(),
-        )
+impl Gui {
+    fn new(config: Config) -> Self {
+        let (gui_tx, gui_rx) = mpsc::channel::<GuiMessage>(CHAN_BUF_SIZE);
+        let (display_buffer_tx, display_buffer_rx) = mpsc::channel::<Array2<u8>>(CHAN_BUF_SIZE);
+        Self {
+            waveform: Waveform::new(),
+            selected_mode: Some(DisplayMode::Frequency),
+            left_slider: config.left_slider_start,
+            right_slider: config.right_slider_start,
+            config,
+            update_vertices: None,
+            gui_tx,
+            gui_rx,
+            renderer_rx: None,
+            stop_tx: None,
+            display_buffer_rx,
+            display_buffer_tx,
+        }
     }
 
-    fn title(&self) -> String {
-        "Audio Reactive LED Strip".to_string()
-    }
-
-    fn update(&mut self, message: Self::Message) -> iced::Command<GuiMessage> {
+    pub fn update(&mut self, message: GuiMessage) {
         match message {
             GuiMessage::ModeSelected(mode) => {
                 self.selected_mode = Some(mode);
@@ -124,11 +136,21 @@ impl Application for Gui {
             //TODO: figure out wtf is going on here, how can we do renders and vertex updates separately?
             GuiMessage::PointsUpdated(vertices) => self.update_vertices(vertices),
             GuiMessage::Tick(_) => self.check_update(),
+            GuiMessage::StopTx(tx) => {
+                self.stop_tx = Some(tx);
+            }
+            GuiMessage::WindowClose(_) => {
+                println!("registered window close event");
+                self.stop_tx
+                    .as_mut()
+                    .expect("stop tx should be initialized by the time window close occurs")
+                    .send(())
+                    .expect("sending the stop signal expected to suceed on normal close");
+            }
         };
-        Command::none()
     }
 
-    fn view(&self) -> iced::Element<'_, Self::Message, Self::Theme, iced::Renderer> {
+    pub fn view(&self) -> iced::Element<GuiMessage> {
         let mode_select = pick_list(
             &DisplayMode::ALL[..],
             self.selected_mode,
@@ -149,7 +171,7 @@ impl Application for Gui {
             horizontal_space().width(30)
         ]
         .height(100)
-        .align_items(Alignment::End)
+        .align_y(Alignment::End)
         .spacing(10);
 
         let shader = shader(&self.waveform)
@@ -161,29 +183,31 @@ impl Application for Gui {
         display_and_controls.into()
     }
 
-    fn theme(&self) -> Self::Theme {
-        Self::Theme::default()
-    }
-
-    fn style(&self) -> <Self::Theme as iced::application::StyleSheet>::Style {
-        <Self::Theme as iced::application::StyleSheet>::Style::default()
-    }
-
-    fn subscription(&self) -> iced::Subscription<Self::Message> {
-        window::frames().map(Self::Message::Tick)
-    }
-
-    fn scale_factor(&self) -> f64 {
-        1.0
+    pub fn subscription(&self) -> iced::Subscription<GuiMessage> {
+        Subscription::batch(vec![
+            window::close_requests().map(GuiMessage::WindowClose),
+            Subscription::run(audio_render_stream),
+        ])
     }
 }
 
-pub struct Flags {
-    config: Config,
+impl Default for Gui {
+    fn default() -> Self {
+        let args = Args::parse();
+        let mut config = load_config(&DEFAULT_CONFIG_PATH.to_string(), true);
+        config.merge_with_args(args);
+        Gui::new(config)
+    }
 }
 
-impl Into<Flags> for Config {
-    fn into(self) -> Flags {
-        Flags { config: self }
-    }
+struct RenderStream {
+    rx: Receiver<GuiMessage>,
+    handle: JoinHandle<()>,
+}
+
+fn audio_render_stream() -> impl Stream<Item = GuiMessage> {
+    let (sender, receiver) = mpsc::channel(100);
+    let renderer = Renderer::new(Config::default(), Some(sender)); // can we somehow pass the config in?
+    thread::spawn(move || renderer.main_loop_external_updates());
+    receiver
 }

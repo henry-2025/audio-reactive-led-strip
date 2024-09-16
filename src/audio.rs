@@ -40,7 +40,7 @@ where
         .collect();
     if configs.is_empty() {
         panic!(
-            "Could not create the intended audio input config: 1 channel, {}Hz, i16 format",
+            "Could not create the intended audio input config: 1 channel, {}Hz, f32 format",
             config.mic_rate
         );
     }

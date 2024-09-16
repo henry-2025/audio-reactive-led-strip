@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ndarray::{s, Array, Array1, Array2, Axis, Dimension, Ix1, Ix2, NewAxis, Shape};
+use ndarray::{s, Array, Array1, Array2, Axis, Dimension, Ix1, Ix2, NewAxis};
 use rustfft::{
     num_complex::{Complex64, ComplexFloat},
     Fft, FftPlanner,
@@ -405,7 +405,7 @@ fn gaussian_kernel(sigma: f64, order: u32, radius: u32) -> Array1<f64> {
 }
 
 fn correlate_1d_single(arr: &Array1<f64>, kern: &Array1<f64>) -> Array1<f64> {
-    let mut output = Array1::<f64>::zeros((arr.shape()[0]));
+    let mut output = Array1::<f64>::zeros(arr.shape()[0]);
     // extend arr by mirroring the ends
     let left_padding = kern.shape()[0] / 2;
     let right_padding = left_padding - 1 + (kern.shape()[0] % 2);

@@ -1,4 +1,4 @@
 // Wifi and socket settings
-const char* ssid     = "your-ssid";
-const char* password = "ssid-password";
+const char* ssid     = "Princess";
+const char* password = "Squeakers";
 unsigned int localPort = 7777;

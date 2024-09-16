@@ -32,20 +32,24 @@ uint8_t N = 0;
 WiFiUDP port;
 // Network information
 // IP must match the IP in config.py
-IPAddress ip(192, 168, 0, 150);
+IPAddress ip(192,168,0,150);
 // Set gateway to your router's gateway
-IPAddress gateway(192, 168, 0, 1);
+IPAddress gateway(10, 0, 0, 1);
 IPAddress subnet(255, 255, 255, 0);
 NeoPixelBus<NeoGrbFeature, Neo800KbpsMethod> ledstrip(NUM_LEDS, PixelPin);
 
 void setup() {
     Serial.begin(115200);
 
-    Serial.println(WiFi.softAPConfig(ip, gateway, subnet) ? "Ready" : "Failed!");
-    Serial.print("Setting soft-AP ... ");
-    Serial.println(WiFi.softAP(ssid, password) ? "Ready" : "Failed!");
-    Serial.print("Soft-AP IP address = ");
-    Serial.println(WiFi.softAPIP());
+    Serial.printf("Setting connecting to %s ...", ssid);
+    WiFi.config(ip, gateway, subnet);
+    WiFi.begin(ssid, password);
+    while(WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(".");
+    }
+    Serial.print("Connected, IP address: ");
+    Serial.println(WiFi.localIP());
 
     port.begin(localPort);
     

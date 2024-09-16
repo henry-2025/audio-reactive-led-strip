@@ -2,7 +2,7 @@ pub mod pipeline;
 
 use iced::{
     mouse,
-    widget::shader::{self, wgpu::Color},
+    widget::shader::{self, wgpu::Color, Viewport},
     Rectangle,
 };
 use pipeline::{Pipeline, Vertex};
@@ -37,13 +37,7 @@ impl Waveform {
     }
 
     pub fn resize(&mut self, new_size: usize) {
-        self.vertices.resize(
-            new_size,
-            Vertex {
-                position: [0.0, 0.0],
-                color: [0, 0, 0],
-            },
-        );
+        self.vertices.resize(new_size, Vertex([0, 0, 0]));
     }
 }
 
@@ -80,13 +74,12 @@ impl Primitive {
 impl shader::Primitive for Primitive {
     fn prepare(
         &self,
-        format: shader::wgpu::TextureFormat,
         device: &shader::wgpu::Device,
         queue: &shader::wgpu::Queue,
-        bounds: Rectangle,
-        target_size: iced::Size<u32>,
-        scale_factor: f32,
+        format: shader::wgpu::TextureFormat,
         storage: &mut shader::Storage,
+        bounds: &Rectangle,
+        viewport: &Viewport,
     ) {
         if !storage.has::<Pipeline>() {
             storage.store(Pipeline::new(
@@ -94,7 +87,7 @@ impl shader::Primitive for Primitive {
                 queue,
                 format,
                 self.vertices.len() as u64,
-                target_size,
+                bounds,
             ));
         }
 
@@ -106,16 +99,15 @@ impl shader::Primitive for Primitive {
 
     fn render(
         &self,
+        encoder: &mut shader::wgpu::CommandEncoder,
         storage: &shader::Storage,
         target: &shader::wgpu::TextureView,
-        target_size: iced::Size<u32>,
-        viewport: Rectangle<u32>,
-        encoder: &mut shader::wgpu::CommandEncoder,
+        clip_bounds: &Rectangle<u32>,
     ) {
         // At this point our pipeline should always be initialized
         let pipeline = storage.get::<Pipeline>().unwrap();
 
         // Render primitive
-        pipeline.render(target, encoder, self.background_color, viewport);
+        pipeline.render(target, encoder, self.background_color, clip_bounds);
     }
 }

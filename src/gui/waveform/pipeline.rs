@@ -14,7 +14,7 @@ impl Pipeline {
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         n_points: u64,
-        size: iced::Size<u32>,
+        size: &iced::Rectangle,
     ) -> Self {
         //vertices of one cube
         let vertex_buffer = Buffer::new(
@@ -108,7 +108,7 @@ impl Pipeline {
         target: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
         clear_color: wgpu::Color,
-        viewport: Rectangle<u32>,
+        viewport: &Rectangle<u32>,
     ) {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -136,10 +136,7 @@ impl Pipeline {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Zeroable, bytemuck::Pod)]
-pub struct Vertex {
-    pub position: [f32; 2],
-    pub color: [i32; 3],
-}
+pub struct Vertex(pub [i32; 3]);
 
 impl Vertex {
     const ATTRS: [wgpu::VertexAttribute; 2] =

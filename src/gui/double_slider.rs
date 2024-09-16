@@ -580,7 +580,7 @@ pub fn draw<T, Theme, Renderer>(
                 width: left_offset - handle_width / 2.0,
                 height: style.rail.width,
             },
-            border: Border::with_radius(style.rail.border_radius),
+            border: style.rail.border,
             ..renderer::Quad::default()
         },
         style.rail.colors.1,
@@ -646,7 +646,7 @@ pub fn draw<T, Theme, Renderer>(
                 width: right_offset - left_offset - handle_width,
                 height: style.rail.width,
             },
-            border: Border::with_radius(style.rail.border_radius),
+            border: style.rail.border,
             ..renderer::Quad::default()
         },
         style.rail.colors.0,
@@ -680,7 +680,7 @@ pub fn draw<T, Theme, Renderer>(
                 width: bounds.width - right_offset,
                 height: style.rail.width,
             },
-            border: Border::with_radius(style.rail.border_radius),
+            border: style.rail.border,
             ..renderer::Quad::default()
         },
         style.rail.colors.1,
@@ -742,7 +742,7 @@ pub struct Rail {
     /// The width of the stroke of a slider rail.
     pub width: f32,
     /// The border radius of the corners of the rail.
-    pub border_radius: border::Radius,
+    pub border: Border,
 }
 
 /// The appearance of the handle of a slider.
@@ -829,7 +829,11 @@ impl StyleSheet for Theme {
                     rail: Rail {
                         colors: (palette.primary.base.color, palette.secondary.base.color),
                         width: 4.0,
-                        border_radius: 2.0.into(),
+                        border: Border {
+                            radius: 2.0.into(),
+                            width: 0.0,
+                            color: Color::TRANSPARENT,
+                        },
                     },
                     handle: Handle {
                         color: palette.background.base.color,
