@@ -9,6 +9,7 @@ use iced::futures::channel::mpsc::Receiver;
 use iced::futures::channel::mpsc::Sender;
 use iced::futures::SinkExt;
 use iced::window;
+use iced::Task;
 use iced::{
     futures::Stream,
     widget::{column, horizontal_space, pick_list, row, shader},
@@ -122,32 +123,42 @@ impl Gui {
         }
     }
 
-    pub fn update(&mut self, message: GuiMessage) {
+    pub fn update(&mut self, message: GuiMessage) -> Task<GuiMessage> {
         match message {
             GuiMessage::ModeSelected(mode) => {
                 self.selected_mode = Some(mode);
+                Task::none()
             }
             GuiMessage::SliderUpdated((value, SliderSide::Left)) => {
                 self.left_slider = value;
+                Task::none()
             }
             GuiMessage::SliderUpdated((value, SliderSide::Right)) => {
                 self.right_slider = value;
+                Task::none()
             }
             //TODO: figure out wtf is going on here, how can we do renders and vertex updates separately?
-            GuiMessage::PointsUpdated(vertices) => self.update_vertices(vertices),
-            GuiMessage::Tick(_) => self.check_update(),
+            GuiMessage::PointsUpdated(vertices) => {
+                self.update_vertices(vertices);
+                Task::none()
+            }
+            GuiMessage::Tick(_) => {
+                self.check_update();
+                Task::none()
+            }
             GuiMessage::StopTx(tx) => {
                 self.stop_tx = Some(tx);
+                Task::none()
             }
-            GuiMessage::WindowClose(_) => {
-                println!("registered window close event");
+            GuiMessage::WindowClose(id) => {
                 self.stop_tx
                     .as_mut()
                     .expect("stop tx should be initialized by the time window close occurs")
                     .send(())
                     .expect("sending the stop signal expected to suceed on normal close");
+                window::close::<GuiMessage>(id)
             }
-        };
+        }
     }
 
     pub fn view(&self) -> iced::Element<GuiMessage> {
@@ -198,11 +209,6 @@ impl Default for Gui {
         config.merge_with_args(args);
         Gui::new(config)
     }
-}
-
-struct RenderStream {
-    rx: Receiver<GuiMessage>,
-    handle: JoinHandle<()>,
 }
 
 fn audio_render_stream() -> impl Stream<Item = GuiMessage> {
