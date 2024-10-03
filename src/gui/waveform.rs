@@ -51,7 +51,7 @@ impl<Message> shader::Program<Message> for Waveform {
         _cursor: mouse::Cursor,
         bounds: Rectangle,
     ) -> Self::Primitive {
-        Primitive::new(&self.vertices, self.background_color)
+        Primitive::new(&self.vertices, self.background_color, bounds)
     }
 }
 
@@ -60,13 +60,19 @@ impl<Message> shader::Program<Message> for Waveform {
 pub struct Primitive {
     vertices: Vec<Vertex>,
     background_color: shader::wgpu::Color,
+    bounds: Rectangle,
 }
 
 impl Primitive {
-    pub fn new(vertices: &Vec<Vertex>, background_color: shader::wgpu::Color) -> Self {
+    pub fn new(
+        vertices: &Vec<Vertex>,
+        background_color: shader::wgpu::Color,
+        bounds: Rectangle,
+    ) -> Self {
         Self {
             vertices: vertices.clone(),
             background_color,
+            bounds,
         }
     }
 }

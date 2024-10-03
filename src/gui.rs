@@ -2,31 +2,21 @@ mod double_slider;
 pub mod waveform;
 
 use clap::Parser;
-use double_slider::DoubleSlider;
-use double_slider::SliderSide;
-use iced::futures::channel::mpsc;
-use iced::futures::channel::mpsc::Receiver;
-use iced::futures::channel::mpsc::Sender;
-use iced::futures::SinkExt;
-use iced::window;
+use double_slider::{DoubleSlider, SliderSide};
 use iced::{
-    futures::Stream,
+    futures::{
+        channel::mpsc::{self, Receiver, Sender},
+        Stream,
+    },
     widget::{column, horizontal_space, pick_list, row, shader},
+    window, Alignment, Length, Subscription, Task,
 };
-use iced::{Alignment, Length, Subscription};
 use ndarray::Array2;
-use std::fmt::Display;
-use std::sync;
-use std::thread;
-use std::thread::JoinHandle;
-use std::time::Instant;
-use waveform::pipeline::Vertex;
-use waveform::Waveform;
+use std::{fmt::Display, sync, thread, time::Instant};
+use waveform::{pipeline::Vertex, Waveform};
 
 use crate::args::Args;
-use crate::config::load_config;
-use crate::config::Config;
-use crate::config::DEFAULT_CONFIG_PATH;
+use crate::config::{load_config, Config, DEFAULT_CONFIG_PATH};
 use crate::renderer::Renderer;
 
 const CHAN_BUF_SIZE: usize = 1;
@@ -122,32 +112,42 @@ impl Gui {
         }
     }
 
-    pub fn update(&mut self, message: GuiMessage) {
+    pub fn update(&mut self, message: GuiMessage) -> Task<GuiMessage> {
         match message {
             GuiMessage::ModeSelected(mode) => {
                 self.selected_mode = Some(mode);
+                Task::none()
             }
             GuiMessage::SliderUpdated((value, SliderSide::Left)) => {
                 self.left_slider = value;
+                Task::none()
             }
             GuiMessage::SliderUpdated((value, SliderSide::Right)) => {
                 self.right_slider = value;
+                Task::none()
             }
             //TODO: figure out wtf is going on here, how can we do renders and vertex updates separately?
-            GuiMessage::PointsUpdated(vertices) => self.update_vertices(vertices),
-            GuiMessage::Tick(_) => self.check_update(),
+            GuiMessage::PointsUpdated(vertices) => {
+                self.update_vertices(vertices);
+                Task::none()
+            }
+            GuiMessage::Tick(_) => {
+                self.check_update();
+                Task::none()
+            }
             GuiMessage::StopTx(tx) => {
                 self.stop_tx = Some(tx);
+                Task::none()
             }
-            GuiMessage::WindowClose(_) => {
-                println!("registered window close event");
+            GuiMessage::WindowClose(id) => {
                 self.stop_tx
                     .as_mut()
                     .expect("stop tx should be initialized by the time window close occurs")
                     .send(())
                     .expect("sending the stop signal expected to suceed on normal close");
+                window::close::<GuiMessage>(id)
             }
-        };
+        }
     }
 
     pub fn view(&self) -> iced::Element<GuiMessage> {
@@ -198,11 +198,6 @@ impl Default for Gui {
         config.merge_with_args(args);
         Gui::new(config)
     }
-}
-
-struct RenderStream {
-    rx: Receiver<GuiMessage>,
-    handle: JoinHandle<()>,
 }
 
 fn audio_render_stream() -> impl Stream<Item = GuiMessage> {

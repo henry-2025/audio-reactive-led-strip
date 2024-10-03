@@ -110,27 +110,25 @@ impl Pipeline {
         clear_color: wgpu::Color,
         viewport: &Rectangle<u32>,
     ) {
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
 
-            pass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
-            pass.set_pipeline(&self.render_pipeline);
-            pass.set_vertex_buffer(0, self.vertex_buffer.raw.slice(..));
-            pass.draw(0..self.num_vertices as u32, 0..1);
-        }
+        pass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
+        pass.set_pipeline(&self.render_pipeline);
+        pass.set_vertex_buffer(0, self.vertex_buffer.raw.slice(..));
+        pass.draw(0..self.num_vertices as u32, 0..1);
     }
 }
 

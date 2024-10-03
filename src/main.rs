@@ -6,9 +6,6 @@ mod gamma_table;
 mod led;
 mod renderer;
 
-use args::Args;
-use clap::Parser;
-use config::{load_config, DEFAULT_CONFIG_PATH};
 use gui::Gui;
 
 #[cfg(not(feature = "cli"))]
@@ -22,6 +19,7 @@ pub fn main() -> iced::Result {
     {
         iced::application("Audio Reactive Renderer", Gui::update, Gui::view)
             .subscription(Gui::subscription)
+            .exit_on_close_request(false)
             .run()
     }
 
