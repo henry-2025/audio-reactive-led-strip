@@ -1,10 +1,10 @@
 use std::{
-    sync, thread,
+    sync,
     time::{Duration, Instant},
 };
 
-use crate::gui::waveform::pipeline::Vertex;
 use cpal::{traits::StreamTrait, InputCallbackInfo};
+use glam::Vec3;
 use iced::futures::channel::mpsc::{Receiver, Sender};
 use ndarray::{arr1, concatenate, s, Array1, Array2, Axis};
 
@@ -12,7 +12,7 @@ use crate::{
     audio::new_audio_stream,
     config::Config,
     dsp::{self, Dsp},
-    gui::GuiMessage,
+    gui::{waveform::Point, GuiMessage},
     led::ESP8266Conn,
 };
 
@@ -126,7 +126,7 @@ impl Renderer {
                 self.update_tx
                     .as_mut()
                     .expect("update tx should exist in render thread")
-                    .try_send(GuiMessage::PointsUpdated(send_buffer_to_vertex(
+                    .try_send(GuiMessage::PointsUpdated(send_buffer_to_points(
                         &self.send_buffer,
                     )))
                     .expect("send points update should succeed if channel is open");
@@ -139,9 +139,15 @@ impl Renderer {
     }
 }
 
-fn send_buffer_to_vertex(send_buffer: &Array2<u8>) -> Vec<Vertex> {
+fn send_buffer_to_points(send_buffer: &Array2<u8>) -> Vec<Point> {
     send_buffer
         .axis_iter(Axis(0))
-        .map(|col| Vertex([col[0] as i32, col[1] as i32, col[2] as i32]))
-        .collect::<Vec<Vertex>>()
+        .map(|col| Point {
+            color: Vec3::new(
+                col[0] as f32 / 255.0,
+                col[1] as f32 / 255.0,
+                col[2] as f32 / 255.0,
+            ),
+        })
+        .collect()
 }

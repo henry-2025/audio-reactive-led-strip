@@ -1,11 +1,23 @@
-use buffer::Buffer;
-use iced::{widget::shader::wgpu, Rectangle};
 mod buffer;
+pub mod point;
+pub mod uniforms;
+use buffer::Buffer;
+use iced::{
+    widget::shader::wgpu::{self, util::BufferInitDescriptor, util::DeviceExt},
+    Rectangle, Size,
+};
+pub use uniforms::Uniforms;
+use vertex::Vertex;
+mod vertex;
 
 pub struct Pipeline {
-    render_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: Buffer,
-    num_vertices: u64,
+    pipeline: wgpu::RenderPipeline,
+    vertices: wgpu::Buffer,
+    points: Buffer,
+    n_points: u8,
+    indices: wgpu::Buffer,
+    uniforms: wgpu::Buffer,
+    uniform_bind_group: wgpu::BindGroup,
 }
 
 impl Pipeline {
@@ -13,52 +25,84 @@ impl Pipeline {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-        n_points: u64,
-        size: &iced::Rectangle,
+        target_size: Size<u32>,
+        n_points: u8,
     ) -> Self {
-        //vertices of one cube
-        let vertex_buffer = Buffer::new(
+        // square instance data
+        let vertices = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("square points"),
+            contents: bytemuck::cast_slice(&Vertex::vertices()),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        // points data
+        let points_buffer = Buffer::new(
             device,
-            "vertex buffer",
-            std::mem::size_of::<Vertex>() as u64,
+            "instance buffer",
+            std::mem::size_of::<point::Raw>() as u64,
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let vertices = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vertex buffer"),
-            usage: wgpu::BufferUsages::VERTEX,
+
+        let indices = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("square index buffer"),
+            contents: bytemuck::cast_slice(&Vertex::indices()),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        //uniforms
+        let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("uniform buffer"),
+            size: std::mem::size_of::<Uniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
-            size: n_points,
+        });
+
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("cubes uniform bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cubes uniform bind group"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniforms.as_entire_binding(),
+            }],
+        });
+
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cubes pipeline layout"),
+            bind_group_layouts: &[&uniform_bind_group_layout],
+            push_constant_ranges: &[],
         });
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("points shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../../shaders/line.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "../../shaders/points.wgsl"
+            ))),
         });
-
-        let render_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("pipeline layout"),
-                bind_group_layouts: &[],
-                push_constant_ranges: &[],
-            });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("points pipeline"),
-            layout: Some(&render_pipeline_layout),
+            layout: Some(&layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[Vertex::desc()],
+                buffers: &[Vertex::desc(), point::Raw::desc()],
             },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineStrip,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
+            primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState {
                 count: 1,
@@ -70,7 +114,18 @@ impl Pipeline {
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Max,
+                        },
+                    }),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -78,72 +133,65 @@ impl Pipeline {
         });
 
         Self {
-            render_pipeline: pipeline,
-            vertex_buffer,
-            num_vertices: n_points,
+            pipeline,
+            points: points_buffer,
+            vertices,
+            uniforms,
+            indices,
+            uniform_bind_group,
+            n_points,
         }
     }
 
-    pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &Vec<Vertex>) {
-        //TODO: see if we can resize vertex buffer if cubes amount changed
-        // let new_size = num_points * std::mem::size_of::<Vertex>();
-        // self.vertices.size(device, new_size as u64);
+    pub fn update(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target_size: Size<u32>,
+        uniforms: &Uniforms,
+        n_points: u8,
+        points: &[point::Raw],
+    ) {
+        //resize points vertex buffer if poitns amount changed
+        self.n_points = n_points;
+        let new_size = n_points as usize * std::mem::size_of::<point::Raw>();
+        self.points.resize(device, new_size as u64);
+        // update uniforms
+        queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(uniforms));
 
-        let buf_len = (vertices.len() * std::mem::size_of::<Vertex>()) as u64;
-
-        if self.vertex_buffer.raw.size() != buf_len {
-            self.vertex_buffer.resize(device, buf_len);
-        }
-
-        //always write new cube data since they are constantly rotating
-        queue.write_buffer(
-            &self.vertex_buffer.raw,
-            0,
-            bytemuck::cast_slice(vertices.as_slice()),
-        );
+        //always write new point data since they are constantly changing color
+        queue.write_buffer(&self.points.raw, 0, bytemuck::cast_slice(points));
     }
 
     pub fn render(
         &self,
         target: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
-        clear_color: wgpu::Color,
-        viewport: &Rectangle<u32>,
+        viewport: Rectangle<u32>,
     ) {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("render pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("cubes.pipeline.pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
 
-        pass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
-        pass.set_pipeline(&self.render_pipeline);
-        pass.set_vertex_buffer(0, self.vertex_buffer.raw.slice(..));
-        pass.draw(0..self.num_vertices as u32, 0..1);
-    }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Zeroable, bytemuck::Pod)]
-pub struct Vertex(pub [i32; 3]);
-
-impl Vertex {
-    const ATTRS: [wgpu::VertexAttribute; 2] =
-        wgpu::vertex_attr_array![0 => Float32x2, 1 => Sint32x2];
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRS,
+            pass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            pass.set_vertex_buffer(0, self.vertices.slice(..));
+            pass.set_vertex_buffer(1, self.points.raw.slice(..));
+            pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint16);
+            pass.draw_indexed(0..6, 0, 0..self.n_points as u32);
         }
     }
 }

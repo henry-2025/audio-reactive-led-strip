@@ -13,7 +13,8 @@ use iced::{
 };
 use ndarray::Array2;
 use std::{fmt::Display, sync, thread, time::Instant};
-use waveform::{pipeline::Vertex, Waveform};
+use waveform::Point;
+use waveform::Waveform;
 
 use crate::args::Args;
 use crate::config::{load_config, Config, DEFAULT_CONFIG_PATH};
@@ -55,8 +56,7 @@ impl Display for DisplayMode {
 pub enum GuiMessage {
     ModeSelected(DisplayMode),
     SliderUpdated((u32, SliderSide)),
-    PointsUpdated(Vec<Vertex>),
-    Tick(Instant),
+    PointsUpdated(Vec<Point>),
     StopTx(sync::mpsc::Sender<()>),
     WindowClose(window::Id),
 }
@@ -67,7 +67,7 @@ pub struct Gui {
     left_slider: u32,
     right_slider: u32,
     config: Config,
-    update_vertices: Option<Vec<Vertex>>,
+    update_points: Option<Vec<Point>>,
     gui_tx: Sender<GuiMessage>,
     gui_rx: Receiver<GuiMessage>,
     renderer_rx: Option<Receiver<GuiMessage>>,
@@ -78,17 +78,17 @@ pub struct Gui {
 
 impl Gui {
     fn check_update(&mut self) {
-        match &self.update_vertices {
+        match &self.update_points {
             Some(vertex_updates) => {
-                self.waveform.update(vertex_updates.clone());
-                self.update_vertices = None;
+                self.waveform.update_points(vertex_updates.clone());
+                self.update_points = None;
             }
             None => (),
         };
     }
 
-    fn update_vertices(&mut self, new_vertices: Vec<Vertex>) {
-        self.update_vertices = Some(new_vertices)
+    fn update_vertices(&mut self, new_vertices: Vec<Point>) {
+        self.update_points = Some(new_vertices)
     }
 }
 
@@ -102,7 +102,7 @@ impl Gui {
             left_slider: config.left_slider_start,
             right_slider: config.right_slider_start,
             config,
-            update_vertices: None,
+            update_points: None,
             gui_tx,
             gui_rx,
             renderer_rx: None,
@@ -126,13 +126,8 @@ impl Gui {
                 self.right_slider = value;
                 Task::none()
             }
-            //TODO: figure out wtf is going on here, how can we do renders and vertex updates separately?
             GuiMessage::PointsUpdated(vertices) => {
-                self.update_vertices(vertices);
-                Task::none()
-            }
-            GuiMessage::Tick(_) => {
-                self.check_update();
+                self.waveform.update_points(vertices);
                 Task::none()
             }
             GuiMessage::StopTx(tx) => {

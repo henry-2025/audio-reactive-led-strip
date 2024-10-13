@@ -1,43 +1,62 @@
-pub mod pipeline;
+mod pipeline;
 
-use iced::{
-    mouse,
-    widget::shader::{self, wgpu::Color, Viewport},
-    Rectangle,
-};
-use pipeline::{Pipeline, Vertex};
+use iced::mouse;
+use iced::widget::shader::{self, wgpu, Viewport};
+use iced::Rectangle;
+pub use pipeline::point::Point;
+use pipeline::point::Raw;
+use pipeline::uniforms::Uniforms;
+use pipeline::Pipeline;
 
-use crate::config::Config;
+use std::cmp::Ordering;
+use std::iter;
+
+pub const MAX: u8 = 255;
 
 #[derive(Clone)]
 pub struct Waveform {
-    pub size: f32,
-    pub vertices: Vec<Vertex>,
-    pub background_color: Color,
+    pub points: Vec<Point>,
 }
 
 impl Waveform {
     pub fn new() -> Self {
-        let config = Config::default();
+        let mut scene = Self { points: vec![] };
 
-        let mut scene = Self {
-            size: 0.2,
-            vertices: vec![],
-            background_color: Color::GREEN,
-        };
-
-        scene.resize(config.n_points as usize);
+        scene.change_amount(MAX);
 
         scene
     }
 
-    pub fn update(&mut self, vertices: Vec<Vertex>) {
-        assert_eq!(vertices.len(), self.vertices.len());
-        self.vertices = vertices;
+    pub fn update_points(&mut self, new_points: Vec<Point>) {
+        self.points = new_points;
     }
 
-    pub fn resize(&mut self, new_size: usize) {
-        self.vertices.resize(new_size, Vertex([0, 0, 0]));
+    pub fn change_amount(&mut self, amount: u8) {
+        let curr_points = self.points.len() as u8;
+
+        match amount.cmp(&curr_points) {
+            Ordering::Greater => {
+                // spawn
+                let cubes_2_spawn = (amount - curr_points) as usize;
+
+                let mut cubes = 0;
+                self.points.extend(iter::from_fn(|| {
+                    if cubes < cubes_2_spawn {
+                        cubes += 1;
+                        Some(Point::new())
+                    } else {
+                        None
+                    }
+                }));
+            }
+            Ordering::Less => {
+                // chop
+                let cubes_2_cut = curr_points - amount;
+                let new_len = self.points.len() - cubes_2_cut as usize;
+                self.points.truncate(new_len);
+            }
+            Ordering::Equal => {}
+        }
     }
 }
 
@@ -51,28 +70,32 @@ impl<Message> shader::Program<Message> for Waveform {
         _cursor: mouse::Cursor,
         bounds: Rectangle,
     ) -> Self::Primitive {
-        Primitive::new(&self.vertices, self.background_color, bounds)
+        Primitive::new(&self.points, bounds)
     }
 }
 
 /// A collection of `Cube`s that can be rendered.
 #[derive(Debug)]
 pub struct Primitive {
-    vertices: Vec<Vertex>,
-    background_color: shader::wgpu::Color,
-    bounds: Rectangle,
+    raw_points: Vec<Raw>,
+    uniforms: Uniforms,
 }
 
 impl Primitive {
-    pub fn new(
-        vertices: &Vec<Vertex>,
-        background_color: shader::wgpu::Color,
-        bounds: Rectangle,
-    ) -> Self {
+    pub fn new(points: &[Point], bounds: Rectangle<f32>) -> Self {
+        let uniforms = Uniforms {
+            width: bounds.width,
+            height: bounds.height,
+            n_points: points.len() as u32,
+        };
+
         Self {
-            vertices: vertices.clone(),
-            background_color,
-            bounds,
+            raw_points: points
+                .into_iter()
+                .enumerate()
+                .map(Raw::from_point)
+                .collect(),
+            uniforms,
         }
     }
 }
@@ -80,11 +103,11 @@ impl Primitive {
 impl shader::Primitive for Primitive {
     fn prepare(
         &self,
-        device: &shader::wgpu::Device,
-        queue: &shader::wgpu::Queue,
-        format: shader::wgpu::TextureFormat,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
         storage: &mut shader::Storage,
-        bounds: &Rectangle,
+        _bounds: &Rectangle,
         viewport: &Viewport,
     ) {
         if !storage.has::<Pipeline>() {
@@ -92,28 +115,35 @@ impl shader::Primitive for Primitive {
                 device,
                 queue,
                 format,
-                self.vertices.len() as u64,
-                bounds,
+                viewport.physical_size(),
+                self.raw_points.len() as u8,
             ));
         }
 
         let pipeline = storage.get_mut::<Pipeline>().unwrap();
 
         // Upload data to GPU
-        pipeline.update(device, queue, &self.vertices);
+        pipeline.update(
+            device,
+            queue,
+            viewport.physical_size(),
+            &self.uniforms,
+            self.raw_points.len() as u8,
+            &self.raw_points,
+        );
     }
 
     fn render(
         &self,
-        encoder: &mut shader::wgpu::CommandEncoder,
+        encoder: &mut wgpu::CommandEncoder,
         storage: &shader::Storage,
-        target: &shader::wgpu::TextureView,
+        target: &wgpu::TextureView,
         clip_bounds: &Rectangle<u32>,
     ) {
         // At this point our pipeline should always be initialized
         let pipeline = storage.get::<Pipeline>().unwrap();
 
         // Render primitive
-        pipeline.render(target, encoder, self.background_color, clip_bounds);
+        pipeline.render(target, encoder, *clip_bounds);
     }
 }
