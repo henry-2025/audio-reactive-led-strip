@@ -10,7 +10,7 @@ pub struct Point {
 impl Default for Point {
     fn default() -> Self {
         Self {
-            color: glam::Vec3::new(1.0, 0.0, 0.0),
+            color: glam::Vec3::new(0.0, 1.0, 0.0),
         }
     }
 }
@@ -55,5 +55,22 @@ impl Raw {
             color: input.1.color,
             index: input.0 as u32,
         }
+    }
+
+    pub fn from_point_split_channels(input: (usize, &Point)) -> [Self; 3] {
+        [
+            Self {
+                color: Vec3::new(input.1.color.x, 0.0, 0.0),
+                index: input.0 as u32 * 3,
+            },
+            Self {
+                color: Vec3::new(0.0, input.1.color.y, 0.0),
+                index: input.0 as u32 * 3 + 1,
+            },
+            Self {
+                color: Vec3::new(0.0, 0.0, input.1.color.z),
+                index: input.0 as u32 * 3 + 2,
+            },
+        ]
     }
 }

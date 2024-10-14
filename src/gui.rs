@@ -12,9 +12,9 @@ use iced::{
     window, Alignment, Length, Subscription, Task,
 };
 use ndarray::Array2;
-use std::{fmt::Display, sync, thread, time::Instant};
-use waveform::Point;
+use std::{fmt::Display, sync, thread};
 use waveform::Waveform;
+use waveform::{Point, WaveformDisplayMode};
 
 use crate::args::Args;
 use crate::config::{load_config, Config, DEFAULT_CONFIG_PATH};
@@ -55,6 +55,7 @@ impl Display for DisplayMode {
 #[derive(Debug, Clone)]
 pub enum GuiMessage {
     ModeSelected(DisplayMode),
+    WaveformDisplayModeSelected(WaveformDisplayMode),
     SliderUpdated((u32, SliderSide)),
     PointsUpdated(Vec<Point>),
     StopTx(sync::mpsc::Sender<()>),
@@ -64,10 +65,10 @@ pub enum GuiMessage {
 pub struct Gui {
     waveform: Waveform,
     selected_mode: Option<DisplayMode>,
+    selected_waveform_display: Option<WaveformDisplayMode>,
     left_slider: u32,
     right_slider: u32,
     config: Config,
-    update_points: Option<Vec<Point>>,
     gui_tx: Sender<GuiMessage>,
     gui_rx: Receiver<GuiMessage>,
     renderer_rx: Option<Receiver<GuiMessage>>,
@@ -77,32 +78,17 @@ pub struct Gui {
 }
 
 impl Gui {
-    fn check_update(&mut self) {
-        match &self.update_points {
-            Some(vertex_updates) => {
-                self.waveform.update_points(vertex_updates.clone());
-                self.update_points = None;
-            }
-            None => (),
-        };
-    }
-
-    fn update_vertices(&mut self, new_vertices: Vec<Point>) {
-        self.update_points = Some(new_vertices)
-    }
-}
-
-impl Gui {
     fn new(config: Config) -> Self {
         let (gui_tx, gui_rx) = mpsc::channel::<GuiMessage>(CHAN_BUF_SIZE);
         let (display_buffer_tx, display_buffer_rx) = mpsc::channel::<Array2<u8>>(CHAN_BUF_SIZE);
+        let waveform_display_mode = WaveformDisplayMode::Colors;
         Self {
-            waveform: Waveform::new(),
+            waveform: Waveform::new(waveform_display_mode),
             selected_mode: Some(DisplayMode::Frequency),
+            selected_waveform_display: Some(waveform_display_mode),
             left_slider: config.left_slider_start,
             right_slider: config.right_slider_start,
             config,
-            update_points: None,
             gui_tx,
             gui_rx,
             renderer_rx: None,
@@ -142,6 +128,11 @@ impl Gui {
                     .expect("sending the stop signal expected to suceed on normal close");
                 window::close::<GuiMessage>(id)
             }
+            GuiMessage::WaveformDisplayModeSelected(mode) => {
+                self.selected_waveform_display = Some(mode);
+                self.waveform.set_mode(mode);
+                Task::none()
+            }
         }
     }
 
@@ -150,6 +141,12 @@ impl Gui {
             &DisplayMode::ALL[..],
             self.selected_mode,
             GuiMessage::ModeSelected,
+        );
+
+        let waveform_select = pick_list(
+            &WaveformDisplayMode::ALL[..],
+            self.selected_waveform_display,
+            GuiMessage::WaveformDisplayModeSelected,
         );
 
         let slider = DoubleSlider::new(
@@ -162,6 +159,7 @@ impl Gui {
         let controls_bar = row![
             horizontal_space().width(30),
             mode_select,
+            waveform_select,
             slider,
             horizontal_space().width(30)
         ]

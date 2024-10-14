@@ -8,13 +8,16 @@ use iced::{
 };
 pub use uniforms::Uniforms;
 use vertex::Vertex;
+
+use super::WaveformDisplayMode;
 mod vertex;
 
 pub struct Pipeline {
     pipeline: wgpu::RenderPipeline,
+    channels_pipeline: wgpu::RenderPipeline,
     vertices: wgpu::Buffer,
     points: Buffer,
-    n_points: u8,
+    n_points: u32,
     indices: wgpu::Buffer,
     uniforms: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
@@ -26,7 +29,7 @@ impl Pipeline {
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         target_size: Size<u32>,
-        n_points: u8,
+        n_points: u32,
     ) -> Self {
         // square instance data
         let vertices = device.create_buffer_init(&BufferInitDescriptor {
@@ -59,7 +62,7 @@ impl Pipeline {
 
         let uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("cubes uniform bind group layout"),
+                label: Some("points uniform bind group layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -73,7 +76,7 @@ impl Pipeline {
             });
 
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("cubes uniform bind group"),
+            label: Some("points uniform bind group"),
             layout: &uniform_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -132,8 +135,53 @@ impl Pipeline {
             multiview: None,
         });
 
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("points channels shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "../../shaders/points_channels.wgsl"
+            ))),
+        });
+        let channels_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("points channels pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[Vertex::desc(), point::Raw::desc()],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Max,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview: None,
+        });
+
         Self {
             pipeline,
+            channels_pipeline,
             points: points_buffer,
             vertices,
             uniforms,
@@ -149,7 +197,7 @@ impl Pipeline {
         queue: &wgpu::Queue,
         target_size: Size<u32>,
         uniforms: &Uniforms,
-        n_points: u8,
+        n_points: u32,
         points: &[point::Raw],
     ) {
         //resize points vertex buffer if poitns amount changed
@@ -168,6 +216,7 @@ impl Pipeline {
         target: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
         viewport: Rectangle<u32>,
+        display_mode: WaveformDisplayMode,
     ) {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -186,11 +235,14 @@ impl Pipeline {
             });
 
             pass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
-            pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertices.slice(..));
             pass.set_vertex_buffer(1, self.points.raw.slice(..));
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint16);
+            match display_mode {
+                WaveformDisplayMode::Colors => pass.set_pipeline(&self.pipeline),
+                WaveformDisplayMode::RGBChannels => pass.set_pipeline(&self.channels_pipeline),
+            }
             pass.draw_indexed(0..6, 0, 0..self.n_points as u32);
         }
     }

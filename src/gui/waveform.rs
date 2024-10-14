@@ -9,26 +9,59 @@ use pipeline::uniforms::Uniforms;
 use pipeline::Pipeline;
 
 use std::cmp::Ordering;
+use std::fmt::Display;
 use std::iter;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WaveformDisplayMode {
+    Colors,
+    RGBChannels,
+}
+
+impl WaveformDisplayMode {
+    pub const ALL: [WaveformDisplayMode; 2] = [
+        WaveformDisplayMode::Colors,
+        WaveformDisplayMode::RGBChannels,
+    ];
+}
+
+impl Display for WaveformDisplayMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                WaveformDisplayMode::RGBChannels => "RGB Individual",
+                WaveformDisplayMode::Colors => "Color",
+            }
+        )
+    }
+}
 
 pub const MAX: u8 = 255;
 
 #[derive(Clone)]
 pub struct Waveform {
     pub points: Vec<Point>,
+    mode: WaveformDisplayMode,
 }
 
 impl Waveform {
-    pub fn new() -> Self {
-        let mut scene = Self { points: vec![] };
-
+    pub fn new(mode: WaveformDisplayMode) -> Self {
+        let mut scene = Self {
+            points: vec![],
+            mode,
+        };
         scene.change_amount(MAX);
-
         scene
     }
 
     pub fn update_points(&mut self, new_points: Vec<Point>) {
         self.points = new_points;
+    }
+
+    pub fn set_mode(&mut self, mode: WaveformDisplayMode) {
+        self.mode = mode;
     }
 
     pub fn change_amount(&mut self, amount: u8) {
@@ -70,7 +103,7 @@ impl<Message> shader::Program<Message> for Waveform {
         _cursor: mouse::Cursor,
         bounds: Rectangle,
     ) -> Self::Primitive {
-        Primitive::new(&self.points, bounds)
+        Primitive::new(&self.points, self.mode, bounds)
     }
 }
 
@@ -78,11 +111,16 @@ impl<Message> shader::Program<Message> for Waveform {
 #[derive(Debug)]
 pub struct Primitive {
     raw_points: Vec<Raw>,
+    display_mode: WaveformDisplayMode,
     uniforms: Uniforms,
 }
 
 impl Primitive {
-    pub fn new(points: &[Point], bounds: Rectangle<f32>) -> Self {
+    pub fn new(
+        points: &[Point],
+        display_mode: WaveformDisplayMode,
+        bounds: Rectangle<f32>,
+    ) -> Self {
         let uniforms = Uniforms {
             width: bounds.width,
             height: bounds.height,
@@ -90,11 +128,20 @@ impl Primitive {
         };
 
         Self {
-            raw_points: points
-                .into_iter()
-                .enumerate()
-                .map(Raw::from_point)
-                .collect(),
+            raw_points: match display_mode {
+                WaveformDisplayMode::Colors => points
+                    .into_iter()
+                    .enumerate()
+                    .map(Raw::from_point)
+                    .collect(),
+                WaveformDisplayMode::RGBChannels => points
+                    .into_iter()
+                    .enumerate()
+                    .map(Raw::from_point_split_channels)
+                    .flatten()
+                    .collect(),
+            },
+            display_mode,
             uniforms,
         }
     }
@@ -116,7 +163,7 @@ impl shader::Primitive for Primitive {
                 queue,
                 format,
                 viewport.physical_size(),
-                self.raw_points.len() as u8,
+                self.raw_points.len() as u32,
             ));
         }
 
@@ -128,7 +175,7 @@ impl shader::Primitive for Primitive {
             queue,
             viewport.physical_size(),
             &self.uniforms,
-            self.raw_points.len() as u8,
+            self.raw_points.len() as u32,
             &self.raw_points,
         );
     }
@@ -144,6 +191,6 @@ impl shader::Primitive for Primitive {
         let pipeline = storage.get::<Pipeline>().unwrap();
 
         // Render primitive
-        pipeline.render(target, encoder, *clip_bounds);
+        pipeline.render(target, encoder, *clip_bounds, self.display_mode);
     }
 }
