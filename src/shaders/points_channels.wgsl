@@ -26,6 +26,7 @@ const POINT_HEIGHT: f32 = POINT_WIDTH * 2.0;
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
+// arrange rgb vertically
 fn get_channel_center(index: u32, point_start: f32, point_height: f32) -> vec2<f32> {
     let vert_displacement: f32 = -f32(i32(index % 3) - 1) * point_height;
     return vec2<f32>(point_start + POINT_WIDTH / 2 + POINT_WIDTH * f32(index / 3), vert_displacement);

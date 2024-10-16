@@ -5,7 +5,8 @@ use clap::Parser;
 use double_slider::{DoubleSlider, SliderSide};
 use iced::{
     futures::{
-        channel::mpsc::{self, Receiver, Sender},
+        self,
+        channel::mpsc::{self, channel, Receiver, Sender},
         Stream,
     },
     widget::{column, horizontal_space, pick_list, row, shader},
@@ -58,7 +59,9 @@ pub enum GuiMessage {
     WaveformDisplayModeSelected(WaveformDisplayMode),
     SliderUpdated((u32, SliderSide)),
     PointsUpdated(Vec<Point>),
-    StopTx(sync::mpsc::Sender<()>),
+    StopTx(std::sync::mpsc::Sender<()>),
+    UpdateTx(futures::channel::mpsc::Sender<GuiMessage>),
+    Config(Config),
     WindowClose(window::Id),
 }
 
@@ -69,9 +72,8 @@ pub struct Gui {
     left_slider: u32,
     right_slider: u32,
     config: Config,
-    gui_tx: Sender<GuiMessage>,
-    gui_rx: Receiver<GuiMessage>,
-    renderer_rx: Option<Receiver<GuiMessage>>,
+    gui_tx: Option<futures::channel::mpsc::Sender<GuiMessage>>,
+    renderer_rx: Option<futures::channel::mpsc::Receiver<GuiMessage>>,
     stop_tx: Option<sync::mpsc::Sender<()>>,
     display_buffer_tx: Sender<Array2<u8>>,
     display_buffer_rx: Receiver<Array2<u8>>,
@@ -79,7 +81,6 @@ pub struct Gui {
 
 impl Gui {
     fn new(config: Config) -> Self {
-        let (gui_tx, gui_rx) = mpsc::channel::<GuiMessage>(CHAN_BUF_SIZE);
         let (display_buffer_tx, display_buffer_rx) = mpsc::channel::<Array2<u8>>(CHAN_BUF_SIZE);
         let waveform_display_mode = WaveformDisplayMode::Colors;
         Self {
@@ -89,8 +90,7 @@ impl Gui {
             left_slider: config.left_slider_start,
             right_slider: config.right_slider_start,
             config,
-            gui_tx,
-            gui_rx,
+            gui_tx: None,
             renderer_rx: None,
             stop_tx: None,
             display_buffer_rx,
@@ -116,8 +116,8 @@ impl Gui {
                 self.waveform.update_points(vertices);
                 Task::none()
             }
-            GuiMessage::StopTx(tx) => {
-                self.stop_tx = Some(tx);
+            GuiMessage::StopTx(renderer_stop_tx) => {
+                self.stop_tx = Some(renderer_stop_tx);
                 Task::none()
             }
             GuiMessage::WindowClose(id) => {
@@ -131,6 +131,14 @@ impl Gui {
             GuiMessage::WaveformDisplayModeSelected(mode) => {
                 self.selected_waveform_display = Some(mode);
                 self.waveform.set_mode(mode);
+                Task::none()
+            }
+            GuiMessage::Config(_) => Task::none(),
+            GuiMessage::UpdateTx(mut renderer_update_tx) => {
+                renderer_update_tx
+                    .try_send(GuiMessage::Config(self.config.clone()))
+                    .expect("gui update input channel should be open at this call");
+                self.gui_tx = Some(renderer_update_tx);
                 Task::none()
             }
         }
@@ -194,8 +202,8 @@ impl Default for Gui {
 }
 
 fn audio_render_stream() -> impl Stream<Item = GuiMessage> {
-    let (sender, receiver) = mpsc::channel(100);
-    let renderer = Renderer::new(Config::default(), Some(sender)); // can we somehow pass the config in?
-    thread::spawn(move || renderer.main_loop_external_updates());
+    let (sender, receiver) = channel(1);
+    let renderer = Renderer::new(Some(sender), None);
+    thread::spawn(move || renderer.main_loop_with_external_updates());
     receiver
 }

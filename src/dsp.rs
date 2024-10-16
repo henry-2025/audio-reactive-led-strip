@@ -230,18 +230,6 @@ fn mel_to_hertz(mel: f64) -> f64 {
     700.0 * (10.0.powf(mel / 2595.0)) - 700.0
 }
 
-/**
- * Single exponential filter value. Returns the new value to the stack
- */
-fn exp_filter_single(current_val: f64, new_val: f64, alpha_decay: f64, alpha_rise: f64) -> f64 {
-    let alpha = if new_val > current_val {
-        alpha_rise
-    } else {
-        alpha_decay
-    };
-    alpha * new_val + (1.0 - alpha) * current_val
-}
-
 struct ExpFilterArr<T>
 where
     T: Dimension,
@@ -620,7 +608,8 @@ mod test_dsp_functions {
             ],
         ]);
 
-        let dsp = Dsp::new(Config::default());
+        let config = Config::default();
+        let dsp = Dsp::new(config);
         assert_abs_diff_eq!(
             dsp.gaussian_filter1d(&input),
             expected_output,

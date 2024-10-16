@@ -790,12 +790,6 @@ pub trait StyleSheet {
     fn dragging(&self, style: &Self::Style) -> Appearance;
 }
 
-/// The appearance of a slider.
-#[derive(Debug, Clone, Copy)]
-pub struct Style {
-    pub rail_colors: (Color, Color),
-    pub handle: Handle,
-}
 
 /// The style of a slider.
 #[derive(Default)]

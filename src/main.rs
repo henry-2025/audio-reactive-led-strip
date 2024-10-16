@@ -1,5 +1,4 @@
 mod args;
-mod audio;
 mod config;
 mod dsp;
 mod gamma_table;
