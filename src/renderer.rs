@@ -8,17 +8,13 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     InputCallbackInfo, SampleFormat, SampleRate, StreamError, SupportedStreamConfig,
 };
-use glam::Vec3;
-use iced::{
-    executor,
-    futures::{self, executor::block_on, SinkExt, StreamExt},
-};
+use iced::futures::{self, executor::block_on, SinkExt, StreamExt};
 use ndarray::{arr1, concatenate, s, Array1, Array2, Axis};
 
 use crate::{
     config::Config,
     dsp::{self, Dsp},
-    gui::{waveform::Point, GuiMessage},
+    gui::GuiMessage,
     led::ESP8266Conn,
 };
 
@@ -89,51 +85,32 @@ impl Renderer {
         }
     }
 
-    // Receive an update from the GUI which affects the spectrum renderer
-    fn apply_updates(&mut self, update_message: GuiMessage) {
-        if let RendererState::Ready(state) = &self.state {
-            match update_message {
-                GuiMessage::ModeSelected(selected_preset) => state.display_mode = selected_preset,
-                GuiMessage::WaveformDisplayModeSelected(_) => todo!(),
-                GuiMessage::SliderUpdated(_) => todo!(),
-                GuiMessage::PointsUpdated(_) => todo!(),
-                GuiMessage::StopTx(_) => todo!(),
-                GuiMessage::UpdateTx(_) => todo!(),
-                GuiMessage::Config(_) => todo!(),
-                GuiMessage::WindowClose(_) => todo!(),
-            }
-        } else {
-            panic!("tried to apply an update before the renderer was in RendererReady state")
-        }
-    }
-
     // start the main loop with an update message channel
     pub fn main_loop(
         self,
         renderer_stop_rx: std::sync::mpsc::Receiver<()>,
         renderer_update_rx: futures::channel::mpsc::Receiver<GuiMessage>,
     ) {
-        self.start_audio_stream(renderer_update_rx);
+        block_on(self.start_audio_stream(renderer_update_rx));
         renderer_stop_rx
             .recv()
-            .expect("error accepting thread stop signal");
+            .expect("wanted to be able to receive the stop signal");
     }
 
     // Start the audio stream with a channel that can receive updates from the GUI
-    fn start_audio_stream(mut self, mut in_channel: futures::channel::mpsc::Receiver<GuiMessage>) {
-        thread::spawn(move || async move {
-            // wait for stream to initialize
-            while let RendererState::Pending = self.state {
-                if let Some(message) = in_channel.next().await {
-                    println!("Received {:?} message from gui", message);
-                    match message {
-                        GuiMessage::Config(config) => self.state = RendererState::new(config),
-                        _ => {}
-                    }
-                } else {
-                    panic!("gui stream closed before audio stream could initialize")
+    async fn start_audio_stream(mut self, mut update_rx: futures::channel::mpsc::Receiver<GuiMessage>) {
+        while let RendererState::Pending = self.state {
+            if let Some(message) = update_rx.next().await {
+                match message {
+                    GuiMessage::Config(config) => self.state = RendererState::new(config),
+                    _ => {}
                 }
+            } else {
+                panic!("gui stream closed before audio stream could initialize")
             }
+        }
+        thread::spawn(move || {
+            // wait for stream to initialize
 
             if let RendererState::Ready(ready) = &self.state {
                 let device = default_host()
@@ -239,7 +216,7 @@ impl Renderer {
         // create the stop channels in here and then send them to the gui
         let (renderer_stop_tx, renderer_stop_rx) = sync::mpsc::channel::<()>();
         let (renderer_input_tx, renderer_input_rx) =
-            futures::channel::mpsc::channel::<GuiMessage>(1);
+            futures::channel::mpsc::channel::<GuiMessage>(10);
 
         let gui_channels_flush_result = async {
             let gui_update_tx = self
@@ -263,17 +240,4 @@ impl Renderer {
 
         self.main_loop(renderer_stop_rx, renderer_input_rx);
     }
-}
-
-fn send_buffer_to_points(send_buffer: &Array2<u8>) -> Vec<Point> {
-    send_buffer
-        .axis_iter(Axis(0))
-        .map(|col| Point {
-            color: Vec3::new(
-                col[0] as f32 / 255.0,
-                col[1] as f32 / 255.0,
-                col[2] as f32 / 255.0,
-            ),
-        })
-        .collect()
 }

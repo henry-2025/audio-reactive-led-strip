@@ -150,7 +150,6 @@ impl Dsp {
                 .slice(s![i * y.shape()[0] / 3..(i + 1) * y.shape()[0] / 3])
                 .map(|x| x.powf(scale));
             let mean = s.mean().unwrap() as usize;
-            println!("{}", mean);
             display_slice.slice_mut(s![..mean, i]).fill(255.0);
             display_slice.slice_mut(s![mean.., i]).fill(0.0);
         }

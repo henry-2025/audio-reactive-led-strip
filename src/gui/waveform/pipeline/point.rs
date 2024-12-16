@@ -19,10 +19,6 @@ impl Point {
     pub fn new() -> Self {
         Self::default()
     }
-
-    pub fn update(&mut self, r: f32, g: f32, b: f32) {
-        self.color = Vec3::from_array([r, g, b]);
-    }
 }
 
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
