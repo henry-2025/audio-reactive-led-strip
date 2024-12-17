@@ -13,8 +13,6 @@ pub struct ESP8266Conn {
     address: SocketAddr,
 }
 
-static MAX_PIXELS_PER_PACKET: usize = 126;
-
 impl ESP8266Conn {
     /// Create a new ESP8266 connection with a specified ip and gamma correction. The socket throws
     /// an io error if it cannot bind
@@ -56,8 +54,8 @@ impl ESP8266Conn {
 
         let send_buffer = self.create_send_buffer(pixels, pixels_prev);
 
-        // TODO: determine whether chunked sends are necessary or if this is okay
-        self.socket.send_to(&send_buffer, self.address)
+        // self.socket.send_to(&send_buffer, self.address)
+        return Ok(pixels.shape()[0])
     }
 
     // construct the flat buffer of (i, r, g, b) indices

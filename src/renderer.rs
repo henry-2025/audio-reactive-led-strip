@@ -8,15 +8,18 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     InputCallbackInfo, SampleFormat, SampleRate, StreamError, SupportedStreamConfig,
 };
+use glam::Vec3;
 use iced::futures::{self, executor::block_on, SinkExt, StreamExt};
 use ndarray::{arr1, concatenate, s, Array1, Array2, Axis};
 
 use crate::{
     config::Config,
     dsp::{self, Dsp},
-    gui::GuiMessage,
+    gui::{waveform::Point, GuiMessage},
     led::ESP8266Conn,
 };
+
+const RENDERER_AUDIO_STREAM_START_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub struct Renderer {
     gui_update_tx: Option<futures::channel::mpsc::Sender<GuiMessage>>,
@@ -91,17 +94,18 @@ impl Renderer {
         renderer_stop_rx: std::sync::mpsc::Receiver<()>,
         renderer_update_rx: futures::channel::mpsc::Receiver<GuiMessage>,
     ) {
-        block_on(self.start_audio_stream(renderer_update_rx));
+        self.start_audio_stream(renderer_update_rx);
         renderer_stop_rx
             .recv()
             .expect("wanted to be able to receive the stop signal");
     }
 
     // Start the audio stream with a channel that can receive updates from the GUI
-    async fn start_audio_stream(mut self, mut update_rx: futures::channel::mpsc::Receiver<GuiMessage>) {
+    fn start_audio_stream(mut self, mut update_rx: futures::channel::mpsc::Receiver<GuiMessage>) {
         while let RendererState::Pending = self.state {
-            if let Some(message) = update_rx.next().await {
-                match message {
+            let message = block_on(update_rx.next());
+            if let Some(m) = message {
+                match m {
                     GuiMessage::Config(config) => self.state = RendererState::new(config),
                     _ => {}
                 }
@@ -111,7 +115,6 @@ impl Renderer {
         }
         thread::spawn(move || {
             // wait for stream to initialize
-
             if let RendererState::Ready(ready) = &self.state {
                 let device = default_host()
                     .default_input_device()
@@ -156,11 +159,12 @@ impl Renderer {
                         |e: StreamError| {
                             println!("Error received from input stream: {}", e);
                         },
-                        None,
+                        Some(RENDERER_AUDIO_STREAM_START_TIMEOUT),
                     )
                     .expect("Could not build audio stream");
 
                 stream.play().expect("error playing audio stream");
+                thread::park();
             } else {
                 panic!("renderer state was not initialized but should have been");
             }
@@ -206,8 +210,15 @@ impl Renderer {
                     .update(&mut new_send_buffer, &ready.send_buffer)
                     .expect("error updating connection");
 
+                self.gui_update_tx
+                    .as_mut()
+                    .expect("test")
+                    .try_send(GuiMessage::PointsUpdated(send_buffer_to_points(
+                        &new_send_buffer,
+                    )))
+                    .expect("sending points to gui should work");
+
                 ready.send_buffer = new_send_buffer;
-            } else {
             }
         }
     }
@@ -240,4 +251,17 @@ impl Renderer {
 
         self.main_loop(renderer_stop_rx, renderer_input_rx);
     }
+}
+
+fn send_buffer_to_points(send_buffer: &Array2<u8>) -> Vec<Point> {
+    send_buffer
+        .axis_iter(Axis(0))
+        .map(|col| Point {
+            color: Vec3::new(
+                col[0] as f32 / 255.0,
+                col[1] as f32 / 255.0,
+                col[2] as f32 / 255.0,
+            ),
+        })
+        .collect()
 }
