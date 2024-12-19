@@ -9,7 +9,7 @@ use iced::{
     window::{self, get_oldest},
     Alignment, Length, Subscription, Task,
 };
-use std::{sync, thread};
+use std::thread;
 use waveform::Waveform;
 use waveform::{Point, WaveformDisplayMode};
 
@@ -23,10 +23,10 @@ pub enum GuiMessage {
     WaveformDisplayModeSelected(WaveformDisplayMode),
     SliderUpdated((u32, SliderSide)),
     PointsUpdated(Vec<Point>),
-    StopTx(std::sync::mpsc::Sender<()>),
     UpdateTx(futures::channel::mpsc::Sender<GuiMessage>),
     Config(Config),
     WindowClose(window::Id),
+    RendererThread(thread::Thread),
     RendererStop,
 }
 
@@ -38,7 +38,7 @@ pub struct Gui {
     right_slider: u32,
     config: Config,
     gui_tx: Option<futures::channel::mpsc::Sender<GuiMessage>>,
-    stop_tx: Option<sync::mpsc::Sender<()>>,
+    renderer_thread: Option<thread::Thread>,
 }
 
 impl Gui {
@@ -52,7 +52,7 @@ impl Gui {
             right_slider: config.right_slider_start,
             config,
             gui_tx: None,
-            stop_tx: None,
+            renderer_thread: None,
         }
     }
 
@@ -74,19 +74,18 @@ impl Gui {
                 self.waveform.update_points(vertices);
                 Task::none()
             }
-            GuiMessage::StopTx(renderer_stop_tx) => {
-                self.stop_tx = Some(renderer_stop_tx);
-                Task::none()
-            }
             GuiMessage::WindowClose(id) => {
-                self.stop_tx
-                    .as_mut()
-                    .expect("stop tx should be initialized by the time window close occurs")
-                    .send(())
-                    .expect("sending the stop signal expected to suceed on normal close");
-                window::close::<GuiMessage>(id)
+                let id = id.clone();
+                let thread = self
+                    .renderer_thread.as_ref().expect("renderer thread should be set before close request sent").clone();
+                get_oldest().and_then(move |oldest_id| {
+                    if oldest_id == id {
+                        thread.unpark();
+                    }
+                    window::close::<GuiMessage>(id)
+                })
             }
-            GuiMessage::RendererStop => get_oldest().and_then(window::close),
+
             GuiMessage::WaveformDisplayModeSelected(mode) => {
                 self.selected_waveform_display = Some(mode);
                 self.waveform.set_mode(mode);
@@ -98,6 +97,11 @@ impl Gui {
                     .try_send(GuiMessage::Config(self.config.clone()))
                     .expect("gui update input channel should be open at this call");
                 self.gui_tx = Some(renderer_update_tx);
+                Task::none()
+            }
+            GuiMessage::RendererStop => window::get_oldest().and_then(window::close),
+            GuiMessage::RendererThread(thread) => {
+                self.renderer_thread = Some(thread);
                 Task::none()
             }
         }

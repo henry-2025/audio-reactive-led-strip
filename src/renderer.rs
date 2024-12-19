@@ -10,10 +10,7 @@ use cpal::{
     InputCallbackInfo, SampleFormat, SampleRate, StreamError, SupportedStreamConfig,
 };
 use glam::Vec3;
-use iced::{
-    futures::{self, executor::block_on, SinkExt, StreamExt},
-    window,
-};
+use iced::futures::{self, executor::block_on, SinkExt, StreamExt};
 use ndarray::{arr1, concatenate, s, Array1, Array2, Axis};
 
 use crate::{
@@ -95,15 +92,9 @@ impl Renderer {
     }
 
     // start the main loop with an update message channel
-    pub fn main_loop(
-        self,
-        renderer_stop_rx: std::sync::mpsc::Receiver<()>,
-        renderer_update_rx: futures::channel::mpsc::Receiver<GuiMessage>,
-    ) {
+    pub fn main_loop(self, renderer_update_rx: futures::channel::mpsc::Receiver<GuiMessage>) {
         self.start_audio_stream(renderer_update_rx);
-        renderer_stop_rx
-            .recv()
-            .expect("wanted to be able to receive the stop signal");
+        thread::park();
     }
 
     // Start the audio stream with a channel that can receive updates from the GUI
@@ -254,7 +245,6 @@ impl Renderer {
 
     pub fn main_loop_with_external_updates(mut self) {
         // create the stop channels in here and then send them to the gui
-        let (renderer_stop_tx, renderer_stop_rx) = sync::mpsc::channel::<()>();
         let (renderer_input_tx, renderer_input_rx) =
             futures::channel::mpsc::channel::<GuiMessage>(1);
 
@@ -264,13 +254,13 @@ impl Renderer {
                 .as_mut()
                 .expect("update tx should exist in mail loop setup");
             gui_update_tx
-                .feed(GuiMessage::StopTx(renderer_stop_tx))
-                .await
-                .expect("feed the renderer's stop tx to gui sender unsuccessful");
-            gui_update_tx
                 .feed(GuiMessage::UpdateTx(renderer_input_tx))
                 .await
                 .expect("send the renderer's input tx to gui sender unsuccesful");
+            gui_update_tx
+                .feed(GuiMessage::RendererThread(thread::current()))
+                .await
+                .expect("send the renderer's handle to gui sender unsuccesful");
 
             gui_update_tx.flush().await
         };
@@ -278,7 +268,7 @@ impl Renderer {
         block_on(gui_channels_flush_result)
             .expect("flushing the renderer's stop tx and input tx to gui sender unsuccessful");
 
-        self.main_loop(renderer_stop_rx, renderer_input_rx);
+        self.main_loop(renderer_input_rx);
     }
 }
 
@@ -293,18 +283,4 @@ fn send_buffer_to_points(send_buffer: &Array2<u8>) -> Vec<Point> {
             ),
         })
         .collect()
-}
-
-fn handle_network_io_errors(error: io::Error) -> Result<usize, io::Error> {
-    match error.kind() {
-        std::io::ErrorKind::HostUnreachable => {
-            println!("Host is unreachable, stopping renderer");
-            Ok(0)
-        }
-        std::io::ErrorKind::NetworkUnreachable => {
-            println!("Network is unreachable, stopping renderer");
-            Ok(0)
-        }
-        _ => Err(error),
-    }
 }
