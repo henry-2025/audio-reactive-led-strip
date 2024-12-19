@@ -1,4 +1,5 @@
 use std::{
+    io::{self, Read},
     sync, thread,
     time::{Duration, Instant},
 };
@@ -9,12 +10,15 @@ use cpal::{
     InputCallbackInfo, SampleFormat, SampleRate, StreamError, SupportedStreamConfig,
 };
 use glam::Vec3;
-use iced::futures::{self, executor::block_on, SinkExt, StreamExt};
+use iced::{
+    futures::{self, executor::block_on, SinkExt, StreamExt},
+    window,
+};
 use ndarray::{arr1, concatenate, s, Array1, Array2, Axis};
 
 use crate::{
     config::Config,
-    dsp::{self, Dsp},
+    dsp::{self, Dsp, Preset},
     gui::{waveform::Point, GuiMessage},
     led::ESP8266Conn,
 };
@@ -36,6 +40,7 @@ struct RendererReady {
     rolling_history: Array1<f64>,
     display_values: Array2<f64>,
     send_buffer: Array2<u8>,
+    ignore_io_errors: bool,
 }
 
 enum RendererState {
@@ -53,13 +58,14 @@ impl RendererReady {
         Self {
             display_values: Array2::<f64>::zeros((config.n_points as usize, 3)),
             send_buffer: Array2::<u8>::zeros((config.n_points as usize, 3)),
-            selected_preset: dsp::Preset::Scroll,
+            selected_preset: Preset::Scroll,
             rolling_history: Array1::<f64>::zeros(config.n_fft_bins as usize),
             frame_duration: Duration::from_secs_f64(1. / config.fps as f64),
             last_render: Instant::now(), // start rendering on our first sample
             conn: ESP8266Conn::new(&config).expect("esp8266 connection should have been made"),
             dsp: Dsp::new(config.clone()),
             config,
+            ignore_io_errors: false,
         }
     }
 }
@@ -205,18 +211,41 @@ impl Renderer {
                     }
                 });
 
-                ready
-                    .conn
-                    .update(&mut new_send_buffer, &ready.send_buffer)
-                    .expect("error updating connection");
+                let io_result = ready.conn.update(&mut new_send_buffer, &ready.send_buffer);
+
+                if let Err(error) = io_result {
+                    if !ready.ignore_io_errors {
+                        if error.kind() == std::io::ErrorKind::HostUnreachable
+                            || error.kind() == std::io::ErrorKind::NetworkUnreachable
+                        {
+                            print!("Encountered an IO error {} press ENTER to ignore or any character + ENTER to quit", error.to_string());
+                            let mut input = String::new();
+                            io::stdin()
+                                .read_line(&mut input)
+                                .expect("unable to read input");
+                            if input.len() > 1 {
+                                self.gui_update_tx
+                                    .as_mut()
+                                    .expect("should be able to acquire mutable gui update tx")
+                                    .try_send(GuiMessage::RendererStop)
+                                    .expect("should be able to send a quit signal to gui");
+                            } else {
+                                println!("Ignoring io errors for now");
+                                ready.ignore_io_errors = true;
+                            }
+                        } else {
+                            panic!("unexpected io error encountered when writing to leds");
+                        }
+                    }
+                }
 
                 self.gui_update_tx
                     .as_mut()
-                    .expect("test")
+                    .expect("should be able to acquire mutable gui update tx")
                     .try_send(GuiMessage::PointsUpdated(send_buffer_to_points(
                         &new_send_buffer,
                     )))
-                    .expect("sending points to gui should work");
+                    .expect("should be able to send the updated points buffer to the gui");
 
                 ready.send_buffer = new_send_buffer;
             }
@@ -227,7 +256,7 @@ impl Renderer {
         // create the stop channels in here and then send them to the gui
         let (renderer_stop_tx, renderer_stop_rx) = sync::mpsc::channel::<()>();
         let (renderer_input_tx, renderer_input_rx) =
-            futures::channel::mpsc::channel::<GuiMessage>(10);
+            futures::channel::mpsc::channel::<GuiMessage>(1);
 
         let gui_channels_flush_result = async {
             let gui_update_tx = self
@@ -264,4 +293,18 @@ fn send_buffer_to_points(send_buffer: &Array2<u8>) -> Vec<Point> {
             ),
         })
         .collect()
+}
+
+fn handle_network_io_errors(error: io::Error) -> Result<usize, io::Error> {
+    match error.kind() {
+        std::io::ErrorKind::HostUnreachable => {
+            println!("Host is unreachable, stopping renderer");
+            Ok(0)
+        }
+        std::io::ErrorKind::NetworkUnreachable => {
+            println!("Network is unreachable, stopping renderer");
+            Ok(0)
+        }
+        _ => Err(error),
+    }
 }

@@ -4,7 +4,7 @@ pub mod uniforms;
 use buffer::Buffer;
 use iced::{
     widget::shader::wgpu::{self, util::BufferInitDescriptor, util::DeviceExt},
-    Rectangle, Size,
+    Rectangle,
 };
 pub use uniforms::Uniforms;
 use vertex::Vertex;
@@ -26,9 +26,7 @@ pub struct Pipeline {
 impl Pipeline {
     pub fn new(
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-        target_size: Size<u32>,
         n_points: u32,
     ) -> Self {
         // square instance data
@@ -195,7 +193,6 @@ impl Pipeline {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        target_size: Size<u32>,
         uniforms: &Uniforms,
         n_points: u32,
         points: &[point::Raw],

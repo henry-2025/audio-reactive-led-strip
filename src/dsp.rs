@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 
 use ndarray::{s, Array, Array1, Array2, Axis, Dimension, Ix1, Ix2, NewAxis};
 use rustfft::{
@@ -39,11 +39,34 @@ pub struct Dsp {
     config: Config,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Copy)]
 pub enum Preset {
     Scroll,
     Power,
     Spectrum,
+}
+
+impl Preset {
+    pub const ALL: [Preset; 3] = [
+        Preset::Scroll,
+        Preset::Power,
+        Preset::Spectrum,
+    ];
+}
+
+
+impl Display for Preset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Preset::Scroll => "Scroll",
+                Preset::Power => "Power",
+                Preset::Spectrum => "Frequency",
+            }
+        )
+    }
 }
 
 impl Dsp {
@@ -212,9 +235,6 @@ impl Dsp {
         self.mel_bank.y.dot(audio)
     }
 
-    fn gaussian_filter1d(&self, input: &Array2<f64>) -> Array2<f64> {
-        correlate_1d(input, &self.gaussian_kernel1.slice(s![..;-1]).to_owned())
-    }
 
     fn gaussian_filter1d_single(&self, input: &Array1<f64>) -> Array1<f64> {
         correlate_1d_single(input, &self.gaussian_kernel1.slice(s![..;-1]).to_owned())

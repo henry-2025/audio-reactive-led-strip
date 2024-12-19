@@ -383,42 +383,6 @@ where
         new_value
     };
 
-    // TODO: these are used when we implement keyboard use
-    let increment = |value: T| -> Option<T> {
-        let step = if state.keyboard_modifiers.shift() {
-            shift_step.unwrap_or(step)
-        } else {
-            step
-        }
-        .into();
-
-        let steps = (value.into() / step).round();
-        let new_value = step * (steps + 1.0);
-
-        if new_value > (*range.end()).into() {
-            return Some(*range.end());
-        }
-
-        T::from_f64(new_value)
-    };
-
-    let decrement = |value: T| -> Option<T> {
-        let step = if state.keyboard_modifiers.shift() {
-            shift_step.unwrap_or(step)
-        } else {
-            step
-        }
-        .into();
-
-        let steps = (value.into() / step).round();
-        let new_value = step * (steps - 1.0);
-
-        if new_value < (*range.start()).into() {
-            return Some(*range.start());
-        }
-
-        T::from_f64(new_value)
-    };
 
     let mut change = |new_value: Option<T>, side: SliderSide| match new_value {
         Some(new_value) => match side {

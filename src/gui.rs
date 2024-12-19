@@ -4,58 +4,22 @@ pub mod waveform;
 use clap::Parser;
 use double_slider::{DoubleSlider, SliderSide};
 use iced::{
-    futures::{
-        self,
-        channel::mpsc::{self, channel, Receiver, Sender},
-        Stream,
-    },
+    futures::{self, channel::mpsc::channel, Stream},
     widget::{column, horizontal_space, pick_list, row, shader},
-    window, Alignment, Length, Subscription, Task,
+    window::{self, get_oldest},
+    Alignment, Length, Subscription, Task,
 };
-use ndarray::Array2;
-use std::{fmt::Display, sync, thread};
+use std::{sync, thread};
 use waveform::Waveform;
 use waveform::{Point, WaveformDisplayMode};
 
-use crate::args::Args;
 use crate::config::{load_config, Config, DEFAULT_CONFIG_PATH};
 use crate::renderer::Renderer;
-
-const CHAN_BUF_SIZE: usize = 1;
-
-// TODO: add more modes and move this to a new module!
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum DisplayMode {
-    Rolling,
-    Power,
-    Frequency,
-}
-
-impl DisplayMode {
-    const ALL: [DisplayMode; 3] = [
-        DisplayMode::Rolling,
-        DisplayMode::Power,
-        DisplayMode::Frequency,
-    ];
-}
-
-impl Display for DisplayMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                DisplayMode::Rolling => "Rolling",
-                DisplayMode::Power => "Power",
-                DisplayMode::Frequency => "Frequency",
-            }
-        )
-    }
-}
+use crate::{args::Args, dsp::Preset};
 
 #[derive(Debug, Clone)]
 pub enum GuiMessage {
-    ModeSelected(DisplayMode),
+    ModeSelected(Preset),
     WaveformDisplayModeSelected(WaveformDisplayMode),
     SliderUpdated((u32, SliderSide)),
     PointsUpdated(Vec<Point>),
@@ -63,38 +27,32 @@ pub enum GuiMessage {
     UpdateTx(futures::channel::mpsc::Sender<GuiMessage>),
     Config(Config),
     WindowClose(window::Id),
+    RendererStop,
 }
 
 pub struct Gui {
     waveform: Waveform,
-    selected_mode: Option<DisplayMode>,
+    selected_mode: Option<Preset>,
     selected_waveform_display: Option<WaveformDisplayMode>,
     left_slider: u32,
     right_slider: u32,
     config: Config,
     gui_tx: Option<futures::channel::mpsc::Sender<GuiMessage>>,
-    renderer_rx: Option<futures::channel::mpsc::Receiver<GuiMessage>>,
     stop_tx: Option<sync::mpsc::Sender<()>>,
-    display_buffer_tx: Sender<Array2<u8>>,
-    display_buffer_rx: Receiver<Array2<u8>>,
 }
 
 impl Gui {
     fn new(config: Config) -> Self {
-        let (display_buffer_tx, display_buffer_rx) = mpsc::channel::<Array2<u8>>(CHAN_BUF_SIZE);
         let waveform_display_mode = WaveformDisplayMode::Colors;
         Self {
             waveform: Waveform::new(waveform_display_mode),
-            selected_mode: Some(DisplayMode::Frequency),
+            selected_mode: Some(Preset::Spectrum),
             selected_waveform_display: Some(waveform_display_mode),
             left_slider: config.left_slider_start,
             right_slider: config.right_slider_start,
             config,
             gui_tx: None,
-            renderer_rx: None,
             stop_tx: None,
-            display_buffer_rx,
-            display_buffer_tx,
         }
     }
 
@@ -128,6 +86,7 @@ impl Gui {
                     .expect("sending the stop signal expected to suceed on normal close");
                 window::close::<GuiMessage>(id)
             }
+            GuiMessage::RendererStop => get_oldest().and_then(window::close),
             GuiMessage::WaveformDisplayModeSelected(mode) => {
                 self.selected_waveform_display = Some(mode);
                 self.waveform.set_mode(mode);
@@ -146,7 +105,7 @@ impl Gui {
 
     pub fn view(&self) -> iced::Element<GuiMessage> {
         let mode_select = pick_list(
-            &DisplayMode::ALL[..],
+            &Preset::ALL[..],
             self.selected_mode,
             GuiMessage::ModeSelected,
         );

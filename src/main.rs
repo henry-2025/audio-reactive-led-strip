@@ -9,7 +9,6 @@ use gui::Gui;
 
 #[cfg(not(feature = "cli"))]
 mod gui;
-#[cfg(not(feature = "cli"))]
 #[cfg(feature = "cli")]
 use std::sync::mpsc;
 

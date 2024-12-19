@@ -155,14 +155,12 @@ impl shader::Primitive for Primitive {
         format: wgpu::TextureFormat,
         storage: &mut shader::Storage,
         _bounds: &Rectangle,
-        viewport: &Viewport,
+        _viewport: &Viewport,
     ) {
         if !storage.has::<Pipeline>() {
             storage.store(Pipeline::new(
                 device,
-                queue,
                 format,
-                viewport.physical_size(),
                 self.raw_points.len() as u32,
             ));
         }
@@ -173,7 +171,6 @@ impl shader::Primitive for Primitive {
         pipeline.update(
             device,
             queue,
-            viewport.physical_size(),
             &self.uniforms,
             self.raw_points.len() as u32,
             &self.raw_points,

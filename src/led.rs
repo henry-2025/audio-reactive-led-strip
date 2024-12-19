@@ -54,8 +54,7 @@ impl ESP8266Conn {
 
         let send_buffer = self.create_send_buffer(pixels, pixels_prev);
 
-        // self.socket.send_to(&send_buffer, self.address)
-        return Ok(pixels.shape()[0])
+        self.socket.send_to(&send_buffer, self.address)
     }
 
     // construct the flat buffer of (i, r, g, b) indices
