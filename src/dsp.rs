@@ -8,20 +8,21 @@ use rustfft::{
 
 use crate::config::Config;
 
-/*
-===To add new transforms===
-
-1. create a transform function with the signature
-fn(display_buffer: &mut Array2<f64>,
-y: &mut Array1<f64>,
-gain: &mut Array1<f64>,
-alpha_decay: f64,
-alpha_rise: f64)
-
-2. create a preset enum
-
-3. assign the preset enum to the function in the apply_transform match
-*/
+/**
+ *
+ * ===To add new transforms===
+ *
+ * 1. create a transform function with the signature
+ * `fn(display_buffer: &mut Array2<f64>,
+ * y: &mut Array1<f64>,
+ * gain: &mut Array1<f64>,
+ * alpha_decay: f64,
+ * alpha_rise: f64)`
+ *
+ * 2. create a preset enum
+ *
+ * 3. assign the preset enum to the function in the apply_transform match
+ */
 pub struct Dsp {
     gain: ExpFilterArr<Ix1>,
     p_filt: ExpFilterArr<Ix2>,
@@ -47,13 +48,8 @@ pub enum Preset {
 }
 
 impl Preset {
-    pub const ALL: [Preset; 3] = [
-        Preset::Scroll,
-        Preset::Power,
-        Preset::Spectrum,
-    ];
+    pub const ALL: [Preset; 3] = [Preset::Scroll, Preset::Power, Preset::Spectrum];
 }
-
 
 impl Display for Preset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -234,7 +230,6 @@ impl Dsp {
     pub fn get_mel_repr(&self, audio: &Array1<f64>) -> Array1<f64> {
         self.mel_bank.y.dot(audio)
     }
-
 
     fn gaussian_filter1d_single(&self, input: &Array1<f64>) -> Array1<f64> {
         correlate_1d_single(input, &self.gaussian_kernel1.slice(s![..;-1]).to_owned())
@@ -541,20 +536,20 @@ mod test_dsp_functions {
     #[test]
     fn test_get_mel_repr() {
         let mut config = Config::default();
-        config.n_fft_bins = 16;
+        config.n_fft_bins = 32;
         config.n_mel_bands = 8;
         let dsp = Dsp::new(config);
 
-        let input = arr1(&[
+        let fft_input_half = arr1(&[
             0.59944508, 0.35953482, 0.43607555, 1.81651546, 0.05219176, 0.06467918, 0.91489904,
             0.32199603, 0.24770591, 1.36049556, 0.3612345, 1.24795475, 0.63443764, 1.6687458,
             1.33319364, 0.55696517,
         ]);
 
-        let expected = arr1(&[
+        let expected_mel_repr = arr1(&[
             0., 0.00314753, 0.35638729, 0.12078571, 0.51270242, 1.63282723, 0.07639316, 1.11434329,
         ]);
-        assert_abs_diff_eq!(dsp.get_mel_repr(&input), expected, epsilon = 1e-5);
+        assert_abs_diff_eq!(dsp.get_mel_repr(&fft_input_half), expected_mel_repr, epsilon = 1e-5);
     }
 
     #[test]
@@ -581,56 +576,20 @@ mod test_dsp_functions {
 
     #[test]
     fn test_gaussian_filter1d() {
-        let input = arr2(&[
-            [0., 1., 2., 3., 4.],
-            [5., 6., 7., 8., 9.],
-            [10., 11., 12., 13., 14.],
-            [15., 16., 17., 18., 19.],
-            [20., 21., 22., 23., 24.],
-        ]);
+        let input = arr1(&[0., 1., 2., 3., 4.]);
 
-        let expected_output = arr2(&[
-            [
-                3.72662540e-06,
-                1.00000000e+00,
-                2.00000000e+00,
-                3.00000000e+00,
-                3.99999627e+00,
-            ],
-            [
-                5.00000373e+00,
-                6.00000000e+00,
-                7.00000000e+00,
-                8.00000000e+00,
-                8.99999627e+00,
-            ],
-            [
-                1.00000037e+01,
-                1.10000000e+01,
-                1.20000000e+01,
-                1.30000000e+01,
-                1.39999963e+01,
-            ],
-            [
-                1.50000037e+01,
-                1.60000000e+01,
-                1.70000000e+01,
-                1.80000000e+01,
-                1.89999963e+01,
-            ],
-            [
-                2.00000037e+01,
-                2.10000000e+01,
-                2.20000000e+01,
-                2.30000000e+01,
-                2.39999963e+01,
-            ],
+        let expected_output = arr1(&[
+            3.72662540e-06,
+            1.00000000e+00,
+            2.00000000e+00,
+            3.00000000e+00,
+            3.99999627e+00,
         ]);
 
         let config = Config::default();
         let dsp = Dsp::new(config);
         assert_abs_diff_eq!(
-            dsp.gaussian_filter1d(&input),
+            dsp.gaussian_filter1d_single(&input),
             expected_output,
             epsilon = 1e-5
         );

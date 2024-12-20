@@ -4,13 +4,12 @@ pub mod waveform;
 use clap::Parser;
 use double_slider::{DoubleSlider, SliderSide};
 use iced::{
-    clipboard::write,
     futures::{self, channel::mpsc::channel, Stream},
     widget::{column, horizontal_space, pick_list, row, shader},
-    window::{self, get_oldest},
+    window,
     Alignment, Length, Subscription, Task,
 };
-use std::{fmt::Display, thread};
+use std::thread;
 use waveform::Waveform;
 use waveform::{Point, WaveformDisplayMode};
 
@@ -57,15 +56,34 @@ impl Gui {
         }
     }
 
+    fn send_to_renderer(&mut self, message: GuiMessage) {
+        self.gui_tx
+            .as_mut()
+            .expect("expected gui tx to be open")
+            .try_send(message)
+            .expect("renderer update unsuccessful");
+    }
+
+    fn close_and_optionally_stop_renderer(&mut self, id: window::Id) -> Task<GuiMessage> {
+        let id = id.clone();
+        let thread = self
+            .renderer_thread
+            .as_ref()
+            .expect("renderer thread should be set before close request sent")
+            .clone();
+        window::get_oldest().and_then(move |oldest_id| {
+            if oldest_id == id {
+                thread.unpark();
+            }
+            window::close::<GuiMessage>(id)
+        })
+    }
+
     pub fn update(&mut self, message: GuiMessage) -> Task<GuiMessage> {
         match message {
             GuiMessage::ModeSelected(mode) => {
                 self.selected_mode = Some(mode);
-                self.gui_tx
-                    .as_mut()
-                    .expect("expected gui tx to be open")
-                    .try_send(GuiMessage::ModeSelected(mode))
-                    .expect("renderer update unsuccessful");
+                self.send_to_renderer(GuiMessage::ModeSelected(mode));
                 Task::none()
             }
             GuiMessage::SliderUpdated((value, SliderSide::Left)) => {
@@ -80,21 +98,7 @@ impl Gui {
                 self.waveform.update_points(vertices);
                 Task::none()
             }
-            GuiMessage::WindowClose(id) => {
-                let id = id.clone();
-                let thread = self
-                    .renderer_thread
-                    .as_ref()
-                    .expect("renderer thread should be set before close request sent")
-                    .clone();
-                get_oldest().and_then(move |oldest_id| {
-                    if oldest_id == id {
-                        thread.unpark();
-                    }
-                    window::close::<GuiMessage>(id)
-                })
-            }
-
+            GuiMessage::WindowClose(id) => self.close_and_optionally_stop_renderer(id),
             GuiMessage::WaveformDisplayModeSelected(mode) => {
                 self.selected_waveform_display = Some(mode);
                 self.waveform.set_mode(mode);
@@ -159,8 +163,15 @@ impl Gui {
     pub fn subscription(&self) -> iced::Subscription<GuiMessage> {
         Subscription::batch(vec![
             window::close_requests().map(GuiMessage::WindowClose),
-            Subscription::run(audio_render_stream),
+            Subscription::run(Self::audio_render_stream),
         ])
+    }
+
+    fn audio_render_stream() -> impl Stream<Item = GuiMessage> {
+        let (sender, receiver) = channel(1);
+        let renderer = Renderer::new(Some(sender), None);
+        thread::spawn(move || renderer.main_loop_with_external_updates());
+        receiver
     }
 }
 
@@ -171,11 +182,4 @@ impl Default for Gui {
         config.merge_with_args(args);
         Gui::new(config)
     }
-}
-
-fn audio_render_stream() -> impl Stream<Item = GuiMessage> {
-    let (sender, receiver) = channel(1);
-    let renderer = Renderer::new(Some(sender), None);
-    thread::spawn(move || renderer.main_loop_with_external_updates());
-    receiver
 }

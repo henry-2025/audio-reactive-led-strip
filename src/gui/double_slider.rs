@@ -21,9 +21,9 @@ use std::ops::RangeInclusive;
 /// An horizontal bar and a handle that selects a single value from a range of
 /// values.
 ///
-/// A [`Slider`] will try to fill the horizontal space of its container.
+/// A [`DoubleSlider`] will try to fill the horizontal space of its container.
 ///
-/// The [`Slider`] range of numeric values is generic and its step size defaults
+/// The [`DoubleSlider`] range of numeric values is generic and its step size defaults
 /// to 1 unit.
 ///
 /// # Example
@@ -70,16 +70,16 @@ where
     Message: Clone,
     Theme: StyleSheet,
 {
-    /// The default height of a [`Slider`].
+    /// The default height of a [`DoubleSlider`].
     pub const DEFAULT_HEIGHT: f32 = 22.0;
 
-    /// Creates a new [`Slider`].
+    /// Creates a new [`DoubleSlider`].
     ///
     /// It expects:
     ///   * an inclusive range of possible values
-    ///   * the current value of the [`Slider`]
-    ///   * a function that will be called when the [`Slider`] is dragged.
-    ///   It receives the new value of the [`Slider`] and must produce a
+    ///   * the current value of the [`DoubleSlider`]
+    ///   * a function that will be called when the [`DoubleSlider`] is dragged.
+    ///   It receives the new value of the [`DoubleSlider`] and must produce a
     ///   `Message`.
     pub fn new<F>(range: RangeInclusive<T>, left_value: T, right_value: T, on_change: F) -> Self
     where
@@ -132,16 +132,16 @@ where
         }
     }
 
-    /// Sets the optional default value for the [`Slider`].
+    /// Sets the optional default value for the [`DoubleSlider`].
     ///
-    /// If set, the [`Slider`] will reset to this value when ctrl-clicked or command-clicked.
+    /// If set, the [`DoubleSlider`] will reset to this value when ctrl-clicked or command-clicked.
     pub fn default(mut self, left_default: impl Into<T>, right_default: impl Into<T>) -> Self {
         self.left_default = Some(left_default.into());
         self.right_default = Some(right_default.into());
         self
     }
 
-    /// Sets the release message of the [`Slider`].
+    /// Sets the release message of the [`DoubleSlider`].
     /// This is called when the mouse is released from the slider.
     ///
     /// Typically, the user's interaction with the slider is finished when this message is produced.
@@ -152,31 +152,31 @@ where
         self
     }
 
-    /// Sets the width of the [`Slider`].
+    /// Sets the width of the [`DoubleSlider`].
     pub fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
         self
     }
 
-    /// Sets the height of the [`Slider`].
+    /// Sets the height of the [`DoubleSlider`].
     pub fn height(mut self, height: impl Into<Pixels>) -> Self {
         self.height = height.into().0;
         self
     }
 
-    /// Sets the style of the [`Slider`].
+    /// Sets the style of the [`DoubleSlider`].
     pub fn style(mut self, style: impl Into<Theme::Style>) -> Self {
         self.style = style.into();
         self
     }
 
-    /// Sets the step size of the [`Slider`].
+    /// Sets the step size of the [`DoubleSlider`].
     pub fn step(mut self, step: impl Into<T>) -> Self {
         self.step = step.into();
         self
     }
 
-    /// Sets the optional "shift" step for the [`Slider`].
+    /// Sets the optional "shift" step for the [`DoubleSlider`].
     ///
     /// If set, this value is used as the step while the shift key is pressed.
     pub fn shift_step(mut self, shift_step: impl Into<T>) -> Self {
@@ -308,7 +308,7 @@ where
     }
 }
 
-/// Processes an [`Event`] and updates the [`State`] of a [`Slider`]
+/// Processes an [`Event`] and updates the [`State`] of a [`DoubleSlider`]
 /// accordingly.
 pub fn update<Message, T>(
     event: Event,
@@ -478,7 +478,7 @@ where
     event::Status::Ignored
 }
 
-/// Draws a [`Slider`].
+/// Draws a [`DoubleSlider`].
 pub fn draw<T, Theme, Renderer>(
     renderer: &mut Renderer,
     layout: Layout<'_>,
@@ -651,7 +651,7 @@ pub fn draw<T, Theme, Renderer>(
     );
 }
 
-/// Computes the current [`mouse::Interaction`] of a [`Slider`].
+/// Computes the current [`mouse::Interaction`] of a [`DoubleSlider`].
 pub fn mouse_interaction(
     layout: Layout<'_>,
     cursor: mouse::Cursor,
@@ -675,7 +675,7 @@ pub enum SliderSide {
     Right,
 }
 
-/// The local state of a [`Slider`].
+/// The local state of a [`DoubleSlider`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct State {
     is_dragging: bool,
