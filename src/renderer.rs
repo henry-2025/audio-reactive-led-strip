@@ -10,7 +10,7 @@ use cpal::{
     InputCallbackInfo, SampleFormat, SampleRate, StreamError, SupportedStreamConfig,
 };
 use glam::Vec3;
-use iced::futures::{self, executor::block_on, SinkExt, StreamExt};
+use iced::futures::{self, channel::mpsc::Receiver, executor::block_on, SinkExt, StreamExt};
 use ndarray::{arr1, concatenate, s, Array1, Array2, Axis};
 
 use crate::{
@@ -38,6 +38,7 @@ struct RendererReady {
     display_values: Array2<f64>,
     send_buffer: Array2<u8>,
     ignore_io_errors: bool,
+    update_rx: Option<Receiver<GuiMessage>>,
 }
 
 enum RendererState {
@@ -63,6 +64,7 @@ impl RendererReady {
             dsp: Dsp::new(config.clone()),
             config,
             ignore_io_errors: false,
+            update_rx: None,
         }
     }
 }
@@ -110,6 +112,13 @@ impl Renderer {
                 panic!("gui stream closed before audio stream could initialize")
             }
         }
+
+        if let RendererState::Ready(ready) = &mut self.state {
+            ready.update_rx = Some(update_rx);
+        } else {
+            panic!("should be in a ready state after stream initialize");
+        }
+
         thread::spawn(move || {
             // wait for stream to initialize
             if let RendererState::Ready(ready) = &self.state {
@@ -182,6 +191,18 @@ impl Renderer {
             if ready.last_render.elapsed() > ready.frame_duration {
                 ready.last_render = Instant::now();
 
+                if let Ok(open) = ready.update_rx.as_mut().expect("test").try_next() {
+                    if let Some(update) = open {
+                        match update {
+                            GuiMessage::ModeSelected(preset) => {
+                                println!("{:?} selected!", preset);
+                                ready.selected_preset = preset;
+                            },
+                            default => println!("received update {:?} from the renderer, but don't know what to do. Continuing", default),
+                        }
+                    }
+                } 
+
                 // transform the audio to the frequency space and then to the mel spectrum
                 let audio_data_rfft = ready.dsp.exec_rfft(&ready.rolling_history);
                 let mut audio_data_mel = ready.dsp.get_mel_repr(&audio_data_rfft);
@@ -209,7 +230,7 @@ impl Renderer {
                         if error.kind() == std::io::ErrorKind::HostUnreachable
                             || error.kind() == std::io::ErrorKind::NetworkUnreachable
                         {
-                            print!("Encountered an IO error {} press ENTER to ignore or any character + ENTER to quit", error.to_string());
+                            println!("Encountered an IO error: {}\npress ENTER to ignore or any character + ENTER to quit", error.to_string());
                             let mut input = String::new();
                             io::stdin()
                                 .read_line(&mut input)

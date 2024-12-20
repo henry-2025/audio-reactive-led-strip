@@ -4,12 +4,13 @@ pub mod waveform;
 use clap::Parser;
 use double_slider::{DoubleSlider, SliderSide};
 use iced::{
+    clipboard::write,
     futures::{self, channel::mpsc::channel, Stream},
     widget::{column, horizontal_space, pick_list, row, shader},
     window::{self, get_oldest},
     Alignment, Length, Subscription, Task,
 };
-use std::thread;
+use std::{fmt::Display, thread};
 use waveform::Waveform;
 use waveform::{Point, WaveformDisplayMode};
 
@@ -60,6 +61,11 @@ impl Gui {
         match message {
             GuiMessage::ModeSelected(mode) => {
                 self.selected_mode = Some(mode);
+                self.gui_tx
+                    .as_mut()
+                    .expect("expected gui tx to be open")
+                    .try_send(GuiMessage::ModeSelected(mode))
+                    .expect("renderer update unsuccessful");
                 Task::none()
             }
             GuiMessage::SliderUpdated((value, SliderSide::Left)) => {
@@ -77,7 +83,10 @@ impl Gui {
             GuiMessage::WindowClose(id) => {
                 let id = id.clone();
                 let thread = self
-                    .renderer_thread.as_ref().expect("renderer thread should be set before close request sent").clone();
+                    .renderer_thread
+                    .as_ref()
+                    .expect("renderer thread should be set before close request sent")
+                    .clone();
                 get_oldest().and_then(move |oldest_id| {
                     if oldest_id == id {
                         thread.unpark();
