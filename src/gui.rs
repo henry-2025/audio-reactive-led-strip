@@ -23,6 +23,7 @@ pub enum GuiMessage {
     WaveformDisplayModeSelected(WaveformDisplayMode),
     SliderUpdated((u32, SliderSide)),
     PointsUpdated(Vec<Point>),
+    MelUpdated(Vec<Point>),
     UpdateTx(futures::channel::mpsc::Sender<GuiMessage>),
     Config(Config),
     WindowClose(window::Id),
@@ -96,6 +97,10 @@ impl Gui {
             }
             GuiMessage::PointsUpdated(vertices) => {
                 self.waveform.update_points(vertices);
+                Task::none()
+            }
+            GuiMessage::MelUpdated(vertices) => {
+                self.waveform.update_mel(vertices);
                 Task::none()
             }
             GuiMessage::WindowClose(id) => self.close_and_optionally_stop_renderer(id),

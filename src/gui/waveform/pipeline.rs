@@ -15,9 +15,11 @@ mod vertex;
 pub struct Pipeline {
     pipeline: wgpu::RenderPipeline,
     channels_pipeline: wgpu::RenderPipeline,
+    mel_pipeline: wgpu::RenderPipeline,
     vertices: wgpu::Buffer,
     points: Buffer,
     n_points: u32,
+    n_mel_bands: u32,
     indices: wgpu::Buffer,
     uniforms: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
@@ -28,6 +30,7 @@ impl Pipeline {
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         n_points: u32,
+        n_mel_bands: u32,
     ) -> Self {
         // square instance data
         let vertices = device.create_buffer_init(&BufferInitDescriptor {
@@ -133,7 +136,7 @@ impl Pipeline {
             multiview: None,
         });
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let channels_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("points channels shader"),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
                 "../../shaders/points_channels.wgsl"
@@ -143,7 +146,7 @@ impl Pipeline {
             label: Some("points channels pipeline"),
             layout: Some(&layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &channels_shader,
                 entry_point: "vs_main",
                 buffers: &[Vertex::desc(), point::Raw::desc()],
             },
@@ -155,7 +158,53 @@ impl Pipeline {
                 alpha_to_coverage_enabled: false,
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &channels_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Max,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview: None,
+        });
+
+
+        let mel_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mel pipeline shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "../../shaders/mel_display.wgsl"
+            ))),
+        });
+
+        let mel_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("points channels pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &mel_shader,
+                entry_point: "vs_main",
+                buffers: &[Vertex::desc(), point::Raw::desc()],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &mel_shader,
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
@@ -180,12 +229,14 @@ impl Pipeline {
         Self {
             pipeline,
             channels_pipeline,
+            mel_pipeline,
             points: points_buffer,
             vertices,
             uniforms,
             indices,
             uniform_bind_group,
             n_points,
+            n_mel_bands,
         }
     }
 
@@ -241,6 +292,9 @@ impl Pipeline {
                 WaveformDisplayMode::RGBChannels => pass.set_pipeline(&self.channels_pipeline),
             }
             pass.draw_indexed(0..6, 0, 0..self.n_points as u32);
+
+            pass.set_pipeline(&self.mel_pipeline);
+            pass.draw_indexed(0..6, 0, self.n_points..self.n_points + self.n_mel_bands as u32);
         }
     }
 }

@@ -1,6 +1,5 @@
 use std::{
-    io,
-    thread,
+    io, thread,
     time::{Duration, Instant},
 };
 
@@ -32,7 +31,7 @@ pub struct Renderer {
     state: RendererState,
 }
 
-struct RendererReady {
+pub struct RendererReady {
     selected_preset: dsp::Preset,
     config: Config,
     frame_duration: Duration,
@@ -134,10 +133,7 @@ impl RendererReady {
         if let Ok(open) = self.gui_update_rx.as_mut().expect("test").try_next() {
             if let Some(update) = open {
                 match update {
-                            GuiMessage::ModeSelected(preset) => {
-                                println!("{:?} selected!", preset);
-                                self.selected_preset = preset;
-                            },
+                            GuiMessage::ModeSelected(preset) => self.selected_preset = preset,
                             default => println!("received update {:?} from the renderer, but don't know what to do. Ignoring", default),
                         }
             }
@@ -147,6 +143,10 @@ impl RendererReady {
         let audio_data_rfft = self.dsp.exec_rfft(&self.rolling_history);
         let mut audio_data_mel = self.dsp.get_mel_repr(&audio_data_rfft);
         self.dsp.gain_and_smooth(&mut audio_data_mel);
+
+        self.send_message_to_gui(GuiMessage::MelUpdated(mel_to_points(
+            self.dsp.get_mel_smoothing(),
+        )));
 
         self.dsp
             .apply_transform_inplace(self.selected_preset.clone(), &mut self.display_values);
@@ -308,6 +308,15 @@ fn send_buffer_to_points(send_buffer: &Array2<u8>) -> Vec<Point> {
                 col[1] as f32 / 255.0,
                 col[2] as f32 / 255.0,
             ),
+        })
+        .collect()
+}
+
+fn mel_to_points(mel_buffer: &Array1<f64>) -> Vec<Point> {
+    mel_buffer
+        .iter()
+        .map(|val| Point {
+            color: Vec3::new(*val as f32, 0.0, 0.0),
         })
         .collect()
 }

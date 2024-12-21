@@ -75,15 +75,10 @@ impl Dsp {
                 0.99,
                 0.1,
             ),
-            common_mode: ExpFilterArr::<Ix1>::new(
-                (config.n_mel_bands / 2) as usize,
-                0.01,
-                0.99,
-                0.01,
-            ),
-            r_filt: ExpFilterArr::<Ix1>::new((config.n_points / 2) as usize, 0.01, 0.2, 0.99),
-            g_filt: ExpFilterArr::<Ix1>::new((config.n_points / 2) as usize, 0.01, 0.05, 0.3),
-            b_filt: ExpFilterArr::<Ix1>::new((config.n_points / 2) as usize, 0.01, 0.1, 0.5),
+            common_mode: ExpFilterArr::<Ix1>::new(config.n_mel_bands as usize, 0.01, 0.99, 0.01),
+            r_filt: ExpFilterArr::<Ix1>::new(config.n_mel_bands as usize, 0.01, 0.2, 0.99),
+            g_filt: ExpFilterArr::<Ix1>::new(config.n_mel_bands as usize, 0.01, 0.05, 0.3),
+            b_filt: ExpFilterArr::<Ix1>::new(config.n_mel_bands as usize, 0.01, 0.1, 0.5),
             prev_spectrum: Array1::zeros(config.n_mel_bands as usize),
             gaussian_kernel1: gaussian_kernel(0.2, 0, 1), // TODO: determine whether radius 1 is what we want
             gaussian_kernel2: gaussian_kernel(0.4, 0, 1), // TODO: determine whether radius 1 is what we want
@@ -100,14 +95,25 @@ impl Dsp {
             config,
         }
     }
+
     pub fn apply_transform_inplace(&mut self, preset: Preset, display_values: &mut Array2<f64>) {
         match preset {
-            Preset::Scroll => self.visualize_scroll(display_values),
+            Preset::Scroll => self.visualize_spectrum(display_values),
             Preset::Power => self.visualize_power(display_values),
             Preset::Spectrum => self.visualize_spectrum(display_values),
         };
     }
 
+    pub fn get_mel_smoothing(&self) -> &Array1<f64>{
+        &self.mel_smoothing.current
+    }
+
+    /**
+     * Scroll effect:
+     * take the display slice and propagate outward from the center, filling the center pixel with
+     * a decay factor
+     *
+     */
     fn visualize_scroll(&mut self, display_values: &mut Array2<f64>) {
         let mut display_slice = display_values
             .slice(s![(self.config.n_points / 2) as usize.., ..])
@@ -149,6 +155,7 @@ impl Dsp {
             filter_display_buffer,
         ]);
     }
+
     fn visualize_power(&mut self, display_values: &mut Array2<f64>) {
         let mut y = self.mel_smoothing.current.clone();
         self.gain.update(&y);
@@ -185,11 +192,21 @@ impl Dsp {
             display_slice
         ]);
     }
+
+    /**
+     * a transform that visualizes characteristics of the spectrum spanning the length of the
+     * display buffer. Assign the RGB channels to different functions
+     * y = filtered mel spectrum
+     * R: y - exp filtered version of y
+     * G: y - previous y
+     * B: exp filtered y
+     *
+     * these channels are mirorred across the center meaning you should favor mel_bands being on
+     * the order of n_points to use the full length of the strip
+     */
     fn visualize_spectrum(&mut self, display_buffer: &mut Array2<f64>) {
-        // TODO: need to do interpolation up here?
         let y = self.mel_smoothing.current.clone();
         self.common_mode.update(&y);
-        //diff = y - self.prev_spectrum
         let diff = &y - &self.prev_spectrum;
         self.prev_spectrum.assign(&y);
 
@@ -205,7 +222,11 @@ impl Dsp {
         let g = ndarray::concatenate![Axis(0), g.slice(s![..;-1]), g];
         let b = ndarray::concatenate![Axis(0), b.slice(s![..;-1]).to_owned(), b.to_owned()];
 
-        display_buffer.assign(&ndarray::stack![Axis(0), r, g, b]);
+        let mel_stack = &ndarray::stack![Axis(1), r, g, b];
+        let start = (self.config.n_points / 2) as usize - mel_stack.shape()[0] / 2;
+        let end = (self.config.n_points / 2) as usize + mel_stack.shape()[0] / 2 + mel_stack.shape()[0] % 2;
+
+        display_buffer.slice_mut(s![start..end,..]).assign(mel_stack);
     }
 
     pub fn exec_rfft(&self, buffer: &Array1<f64>) -> Array1<f64> {
@@ -219,6 +240,14 @@ impl Dsp {
             .to_owned()
     }
 
+    /**
+     * a general processing function that we call on every iteration of the transform to make
+     * movements look 'nice'
+     * 1. square mel values
+     * 2. smooth with 1d gaussian filter along the minor axis
+     * 3. apply an exponential filter to the gain of the spectrum
+     * 4. apply an exponential filter to the movement of the spectrum
+     */
     pub fn gain_and_smooth(&mut self, mel: &mut Array1<f64>) {
         mel.map_mut(|x| *x = x.powi(2));
         let filtered_mel = self.gaussian_filter1d_single(mel);
@@ -264,7 +293,7 @@ impl ExpFilterArr<Ix2> {
     pub fn update(&mut self, new: &Array2<f64>) {
         assert_eq!(self.current.shape(), new.shape());
         self.current.indexed_iter_mut().for_each(|(i, c)| {
-            let alpha = if new[i] - *c > 0.0 {
+            let alpha = if new[i] > *c {
                 self.alpha_rise
             } else {
                 self.alpha_decay
@@ -285,7 +314,7 @@ impl ExpFilterArr<Ix1> {
     pub fn update(&mut self, new: &Array1<f64>) {
         assert_eq!(self.current.len(), new.len());
         self.current.indexed_iter_mut().for_each(|(i, c)| {
-            let alpha = if new[i] - *c > 0.0 {
+            let alpha = if new[i] > *c {
                 self.alpha_rise
             } else {
                 self.alpha_decay
@@ -293,27 +322,6 @@ impl ExpFilterArr<Ix1> {
             *c = alpha * new[i] + (1.0 - alpha) * (*c);
         })
     }
-}
-
-fn exp_filter_array(
-    current: &ndarray::Array1<f64>,
-    new: &ndarray::Array1<f64>,
-    alpha_decay: f64,
-    alpha_rise: f64,
-) -> ndarray::Array1<f64> {
-    assert_eq!(current.len(), new.len());
-    current
-        .into_iter()
-        .enumerate()
-        .map(|(i, c)| {
-            let alpha = if new[i] - c > 0.0 {
-                alpha_rise
-            } else {
-                alpha_decay
-            };
-            alpha * new[i] + (1.0 - alpha) * c
-        })
-        .collect()
 }
 
 pub fn new_rfft(fft_size: u32) -> Arc<dyn Fft<f64>> {
@@ -462,16 +470,17 @@ mod test_dsp_functions {
     }
 
     #[test]
-    fn test_exp_filter() {
+    fn test_exp_filter_1d() {
         let mut npz_reader =
             NpzReader::new(File::open("./test/exp_filter_test.npz").unwrap()).unwrap();
 
         let expected: Array1<f64> = npz_reader.by_name("expected.npy").unwrap();
         let update: Array1<f64> = npz_reader.by_name("update.npy").unwrap();
 
-        let current = ndarray::Array::ones(127) * 0.01;
-        let output = exp_filter_array(&current, &update, 0.1, 0.5);
-        assert_abs_diff_eq!(output, &expected, epsilon = 1e-3);
+        let mut exp_filter = ExpFilterArr::<Ix1>::new(127, 0.01, 0.5, 0.1);
+
+        exp_filter.update(&update);
+        assert_abs_diff_eq!(exp_filter.current, &expected, epsilon = 1e-3);
     }
 
     #[test]
@@ -549,7 +558,11 @@ mod test_dsp_functions {
         let expected_mel_repr = arr1(&[
             0., 0.00314753, 0.35638729, 0.12078571, 0.51270242, 1.63282723, 0.07639316, 1.11434329,
         ]);
-        assert_abs_diff_eq!(dsp.get_mel_repr(&fft_input_half), expected_mel_repr, epsilon = 1e-5);
+        assert_abs_diff_eq!(
+            dsp.get_mel_repr(&fft_input_half),
+            expected_mel_repr,
+            epsilon = 1e-5
+        );
     }
 
     #[test]

@@ -4,4 +4,5 @@ pub struct Uniforms {
     pub width: f32,
     pub height: f32,
     pub n_points: u32,
+    pub n_mel_points: u32,
 }

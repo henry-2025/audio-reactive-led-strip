@@ -42,14 +42,16 @@ pub const MAX: u8 = 255;
 
 #[derive(Clone)]
 pub struct Waveform {
-    pub points: Vec<Point>,
+    pub display_points: Vec<Point>,
+    pub mel_points: Vec<Point>,
     mode: WaveformDisplayMode,
 }
 
 impl Waveform {
     pub fn new(mode: WaveformDisplayMode) -> Self {
         let mut scene = Self {
-            points: vec![],
+            display_points: vec![],
+            mel_points: vec![],
             mode,
         };
         scene.change_amount(MAX);
@@ -57,7 +59,11 @@ impl Waveform {
     }
 
     pub fn update_points(&mut self, new_points: Vec<Point>) {
-        self.points = new_points;
+        self.display_points = new_points;
+    }
+
+    pub fn update_mel(&mut self, new_points: Vec<Point>) {
+        self.mel_points = new_points;
     }
 
     pub fn set_mode(&mut self, mode: WaveformDisplayMode) {
@@ -65,7 +71,7 @@ impl Waveform {
     }
 
     pub fn change_amount(&mut self, amount: u8) {
-        let curr_points = self.points.len() as u8;
+        let curr_points = self.display_points.len() as u8;
 
         match amount.cmp(&curr_points) {
             Ordering::Greater => {
@@ -73,7 +79,7 @@ impl Waveform {
                 let cubes_2_spawn = (amount - curr_points) as usize;
 
                 let mut cubes = 0;
-                self.points.extend(iter::from_fn(|| {
+                self.display_points.extend(iter::from_fn(|| {
                     if cubes < cubes_2_spawn {
                         cubes += 1;
                         Some(Point::new())
@@ -85,8 +91,8 @@ impl Waveform {
             Ordering::Less => {
                 // chop
                 let cubes_2_cut = curr_points - amount;
-                let new_len = self.points.len() - cubes_2_cut as usize;
-                self.points.truncate(new_len);
+                let new_len = self.display_points.len() - cubes_2_cut as usize;
+                self.display_points.truncate(new_len);
             }
             Ordering::Equal => {}
         }
@@ -103,44 +109,52 @@ impl<Message> shader::Program<Message> for Waveform {
         _cursor: mouse::Cursor,
         bounds: Rectangle,
     ) -> Self::Primitive {
-        Primitive::new(&self.points, self.mode, bounds)
+        Primitive::new(&self.display_points, &self.mel_points, self.mode, bounds)
     }
 }
 
 /// A collection of `Cube`s that can be rendered.
 #[derive(Debug)]
 pub struct Primitive {
-    raw_points: Vec<Raw>,
+    raw_display_points: Vec<Raw>,
+    raw_mel_points: Vec<Raw>,
     display_mode: WaveformDisplayMode,
     uniforms: Uniforms,
 }
 
 impl Primitive {
     pub fn new(
-        points: &[Point],
+        display_points: &[Point],
+        mel_points: &[Point],
         display_mode: WaveformDisplayMode,
         bounds: Rectangle<f32>,
     ) -> Self {
         let uniforms = Uniforms {
             width: bounds.width,
             height: bounds.height,
-            n_points: points.len() as u32,
+            n_points: display_points.len() as u32,
+            n_mel_points: mel_points.len() as u32,
         };
 
         Self {
-            raw_points: match display_mode {
-                WaveformDisplayMode::Colors => points
+            raw_display_points: match display_mode {
+                WaveformDisplayMode::Colors => display_points
                     .into_iter()
                     .enumerate()
                     .map(Raw::from_point)
                     .collect(),
-                WaveformDisplayMode::RGBChannels => points
+                WaveformDisplayMode::RGBChannels => display_points
                     .into_iter()
                     .enumerate()
                     .map(Raw::from_point_split_channels)
                     .flatten()
                     .collect(),
             },
+            raw_mel_points: mel_points
+                .into_iter()
+                .enumerate()
+                .map(Raw::from_point)
+                .collect(),
             display_mode,
             uniforms,
         }
@@ -161,7 +175,8 @@ impl shader::Primitive for Primitive {
             storage.store(Pipeline::new(
                 device,
                 format,
-                self.raw_points.len() as u32,
+                self.raw_display_points.len() as u32,
+                self.raw_mel_points.len() as u32,
             ));
         }
 
@@ -172,8 +187,8 @@ impl shader::Primitive for Primitive {
             device,
             queue,
             &self.uniforms,
-            self.raw_points.len() as u32,
-            &self.raw_points,
+            self.raw_display_points.len() as u32,
+            &self.raw_display_points,
         );
     }
 
