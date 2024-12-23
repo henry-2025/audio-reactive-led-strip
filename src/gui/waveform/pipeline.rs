@@ -293,8 +293,8 @@ impl Pipeline {
             }
             pass.draw_indexed(0..6, 0, 0..self.n_points as u32);
 
-            pass.set_pipeline(&self.mel_pipeline);
-            pass.draw_indexed(0..6, 0, self.n_points..self.n_points + self.n_mel_bands as u32);
+            //pass.set_pipeline(&self.mel_pipeline);
+            //pass.draw_indexed(0..6, 0, self.n_points..self.n_points + self.n_mel_bands as u32);
         }
     }
 }

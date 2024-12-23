@@ -3,11 +3,11 @@ use iced::widget::shader::wgpu;
 
 /// A single instance of a cube.
 #[derive(Debug, Clone)]
-pub struct Point {
+pub struct ColorPoint {
     pub color: Vec3,
 }
 
-impl Default for Point {
+impl Default for ColorPoint {
     fn default() -> Self {
         Self {
             color: glam::Vec3::new(0.0, 1.0, 0.0),
@@ -15,7 +15,7 @@ impl Default for Point {
     }
 }
 
-impl Point {
+impl ColorPoint {
     pub fn new() -> Self {
         Self::default()
     }
@@ -46,14 +46,14 @@ impl Raw {
 }
 
 impl Raw {
-    pub fn from_point(input: (usize, &Point)) -> Self {
+    pub fn from_point(input: (usize, &ColorPoint)) -> Self {
         Self {
             color: input.1.color,
             index: input.0 as u32,
         }
     }
 
-    pub fn from_point_split_channels(input: (usize, &Point)) -> [Self; 3] {
+    pub fn from_point_split_channels(input: (usize, &ColorPoint)) -> [Self; 3] {
         [
             Self {
                 color: Vec3::new(input.1.color.x, 0.0, 0.0),

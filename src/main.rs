@@ -3,7 +3,7 @@ mod config;
 mod dsp;
 mod gamma_table;
 mod led;
-mod renderer;
+mod audio;
 
 use gui::Gui;
 

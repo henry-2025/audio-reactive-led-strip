@@ -2,44 +2,54 @@ mod double_slider;
 pub mod waveform;
 
 use clap::Parser;
+use cpal::traits::HostTrait;
 use double_slider::{DoubleSlider, SliderSide};
 use iced::{
-    futures::{self, channel::mpsc::channel, Stream},
+    futures::Stream,
+    stream::channel,
     widget::{column, horizontal_space, pick_list, row, shader},
-    window,
-    Alignment, Length, Subscription, Task,
+    window, Alignment, Length, Subscription, Task,
 };
-use std::thread;
+use std::{io, thread};
 use waveform::Waveform;
-use waveform::{Point, WaveformDisplayMode};
+use waveform::WaveformDisplayMode;
 
-use crate::config::{load_config, Config, DEFAULT_CONFIG_PATH};
-use crate::renderer::Renderer;
-use crate::{args::Args, dsp::Preset};
+use crate::{
+    args::Args,
+    audio::{self, RecordingDevice},
+    dsp::Preset,
+};
+use crate::{
+    audio::AudioStream,
+    config::{load_config, Config, DEFAULT_CONFIG_PATH},
+    dsp::Dsp,
+    led::ESP8266Conn,
+};
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub enum GuiMessage {
-    ModeSelected(Preset),
-    WaveformDisplayModeSelected(WaveformDisplayMode),
-    SliderUpdated((u32, SliderSide)),
-    PointsUpdated(Vec<Point>),
-    MelUpdated(Vec<Point>),
-    UpdateTx(futures::channel::mpsc::Sender<GuiMessage>),
-    Config(Config),
+    PresetSelected(Preset),
     WindowClose(window::Id),
-    RendererThread(thread::Thread),
-    RendererStop,
+    WaveformDisplayModeSelected(WaveformDisplayMode),
+    AudioCaptureThread(thread::Thread),
+    RecordingDeviceSelected(RecordingDevice),
+    SliderUpdated((u32, SliderSide)),
+    AudioBuffer(Vec<f32>),
 }
 
 pub struct Gui {
     waveform: Waveform,
-    selected_mode: Option<Preset>,
+    selected_preset: Option<Preset>,
     selected_waveform_display: Option<WaveformDisplayMode>,
     left_slider: u32,
     right_slider: u32,
     config: Config,
-    gui_tx: Option<futures::channel::mpsc::Sender<GuiMessage>>,
-    renderer_thread: Option<thread::Thread>,
+    dsp: Dsp,
+    esp_device: ESP8266Conn,
+    recording_device: Option<RecordingDevice>,
+    all_recording_devices: Vec<RecordingDevice>,
+    audio_capture_thread: Option<thread::Thread>,
+    ignore_io_errors: bool,
 }
 
 impl Gui {
@@ -47,28 +57,28 @@ impl Gui {
         let waveform_display_mode = WaveformDisplayMode::Colors;
         Self {
             waveform: Waveform::new(waveform_display_mode),
-            selected_mode: Some(Preset::Spectrum),
+            selected_preset: Some(Preset::DEFAULT),
             selected_waveform_display: Some(waveform_display_mode),
             left_slider: config.left_slider_start,
             right_slider: config.right_slider_start,
+            dsp: Dsp::new(&config),
+            esp_device: ESP8266Conn::new(&config)
+                .expect("esp8266 connection should have been made"),
+            recording_device: Some(RecordingDevice::new(
+                cpal::default_host()
+                    .default_input_device()
+                    .expect("no default input device found"),
+            )),
+            all_recording_devices: audio::get_recording_devices(),
             config,
-            gui_tx: None,
-            renderer_thread: None,
+            audio_capture_thread: None,
+            ignore_io_errors: false,
         }
     }
 
-    fn send_to_renderer(&mut self, message: GuiMessage) {
-        self.gui_tx
-            .as_mut()
-            .expect("expected gui tx to be open")
-            .try_send(message)
-            .expect("renderer update unsuccessful");
-    }
-
-    fn close_and_optionally_stop_renderer(&mut self, id: window::Id) -> Task<GuiMessage> {
-        let id = id.clone();
+    fn close_and_maybe_stop_render_thread(&self, id: window::Id) -> Task<GuiMessage> {
         let thread = self
-            .renderer_thread
+            .audio_capture_thread
             .as_ref()
             .expect("renderer thread should be set before close request sent")
             .clone();
@@ -82,9 +92,9 @@ impl Gui {
 
     pub fn update(&mut self, message: GuiMessage) -> Task<GuiMessage> {
         match message {
-            GuiMessage::ModeSelected(mode) => {
-                self.selected_mode = Some(mode);
-                self.send_to_renderer(GuiMessage::ModeSelected(mode));
+            GuiMessage::PresetSelected(mode) => {
+                self.selected_preset = Some(mode);
+                self.dsp.selected_preset = mode;
                 Task::none()
             }
             GuiMessage::SliderUpdated((value, SliderSide::Left)) => {
@@ -95,31 +105,34 @@ impl Gui {
                 self.right_slider = value;
                 Task::none()
             }
-            GuiMessage::PointsUpdated(vertices) => {
-                self.waveform.update_points(vertices);
-                Task::none()
-            }
-            GuiMessage::MelUpdated(vertices) => {
-                self.waveform.update_mel(vertices);
-                Task::none()
-            }
-            GuiMessage::WindowClose(id) => self.close_and_optionally_stop_renderer(id),
+            GuiMessage::WindowClose(id) => self.close_and_maybe_stop_render_thread(id),
             GuiMessage::WaveformDisplayModeSelected(mode) => {
                 self.selected_waveform_display = Some(mode);
                 self.waveform.set_mode(mode);
                 Task::none()
             }
-            GuiMessage::Config(_) => Task::none(),
-            GuiMessage::UpdateTx(mut renderer_update_tx) => {
-                renderer_update_tx
-                    .try_send(GuiMessage::Config(self.config.clone()))
-                    .expect("gui update input channel should be open at this call");
-                self.gui_tx = Some(renderer_update_tx);
+            GuiMessage::AudioCaptureThread(thread) => {
+                self.audio_capture_thread = Some(thread);
                 Task::none()
             }
-            GuiMessage::RendererStop => window::get_oldest().and_then(window::close),
-            GuiMessage::RendererThread(thread) => {
-                self.renderer_thread = Some(thread);
+            GuiMessage::AudioBuffer(vec) => {
+                self.dsp.update_audio(&vec);
+                let device_buffer = self.dsp.get_send_buffer();
+                let mel_display = self.dsp.get_current_mel_display();
+
+                self.waveform.update_points(&device_buffer);
+                self.waveform.update_mel_display(mel_display);
+
+                self.esp_device
+                    .send_buffer_to_device(&device_buffer)
+                    .or_else(|err| self.handle_io_errors(err))
+                    .or_else(|_| self.error_handle_prompt())
+                    .expect("at this point should have addressed all errors");
+
+                Task::none()
+            }
+            GuiMessage::RecordingDeviceSelected(recording_device) => {
+                self.recording_device = Some(recording_device);
                 Task::none()
             }
         }
@@ -128,8 +141,14 @@ impl Gui {
     pub fn view(&self) -> iced::Element<GuiMessage> {
         let mode_select = pick_list(
             &Preset::ALL[..],
-            self.selected_mode,
-            GuiMessage::ModeSelected,
+            self.selected_preset,
+            GuiMessage::PresetSelected,
+        );
+
+        let audio_device_select = pick_list(
+            self.all_recording_devices.as_slice(),
+            self.recording_device.clone(),
+            GuiMessage::RecordingDeviceSelected,
         );
 
         let waveform_select = pick_list(
@@ -148,6 +167,7 @@ impl Gui {
         let controls_bar = row![
             horizontal_space().width(30),
             mode_select,
+            audio_device_select,
             waveform_select,
             slider,
             horizontal_space().width(30)
@@ -168,15 +188,47 @@ impl Gui {
     pub fn subscription(&self) -> iced::Subscription<GuiMessage> {
         Subscription::batch(vec![
             window::close_requests().map(GuiMessage::WindowClose),
-            Subscription::run(Self::audio_render_stream),
+            Subscription::run_with_id(
+                1,
+                Self::start_new_audio_stream(
+                    self.config.fps,
+                    self.config.mic_rate,
+                    self.recording_device
+                        .as_ref()
+                        .expect("this should always be set")
+                        .clone(),
+                ),
+            ),
         ])
     }
 
-    fn audio_render_stream() -> impl Stream<Item = GuiMessage> {
-        let (sender, receiver) = channel(1);
-        let renderer = Renderer::new(Some(sender), None);
-        thread::spawn(move || renderer.main_loop_with_external_updates());
-        receiver
+    fn start_new_audio_stream(
+        fps: u32,
+        mic_rate: u32,
+        recording_device: RecordingDevice,
+    ) -> impl Stream<Item = GuiMessage> {
+        channel(1, move |audio_tx| async move {
+            let audio_stream: AudioStream =
+                AudioStream::new(audio_tx, fps, mic_rate, recording_device.clone());
+            audio_stream.start();
+        })
+    }
+
+    fn handle_io_errors(&self, err: io::Error) -> Result<usize, io::Error> {
+        if !self.ignore_io_errors
+            && (err.kind() == std::io::ErrorKind::HostUnreachable
+                || err.kind() == std::io::ErrorKind::NetworkUnreachable)
+        {
+            Err(err)
+        } else {
+            Ok(0)
+        }
+    }
+
+    fn error_handle_prompt(&mut self) -> Result<usize, io::Error> {
+        println!("encountered unhandled io error and handling prompt");
+        self.ignore_io_errors = true;
+        Ok(0)
     }
 }
 
