@@ -1,9 +1,11 @@
 mod pipeline;
 
+use glam::Vec3;
 use iced::mouse;
 use iced::widget::shader::{self, wgpu, Viewport};
 use iced::Rectangle;
-pub use pipeline::point::Point;
+use ndarray::{Array1, Array2, Axis};
+pub use pipeline::point::ColorPoint;
 use pipeline::point::Raw;
 use pipeline::uniforms::Uniforms;
 use pipeline::Pipeline;
@@ -42,7 +44,8 @@ pub const MAX: u8 = 255;
 
 #[derive(Clone)]
 pub struct Waveform {
-    pub points: Vec<Point>,
+    pub points: Vec<ColorPoint>,
+    pub mel_points: Vec<ColorPoint>,
     mode: WaveformDisplayMode,
 }
 
@@ -50,14 +53,19 @@ impl Waveform {
     pub fn new(mode: WaveformDisplayMode) -> Self {
         let mut scene = Self {
             points: vec![],
+            mel_points: vec![],
             mode,
         };
         scene.change_amount(MAX);
         scene
     }
 
-    pub fn update_points(&mut self, new_points: Vec<Point>) {
-        self.points = new_points;
+    pub fn update_points(&mut self, new_points: &Array2<u8>) {
+        self.points = send_buffer_to_color_points(new_points);
+    }
+
+    pub fn update_mel_display(&mut self, mel_values: &Array1<f64>) {
+        self.mel_points = mel_values_to_color_points(mel_values);
     }
 
     pub fn set_mode(&mut self, mode: WaveformDisplayMode) {
@@ -76,7 +84,7 @@ impl Waveform {
                 self.points.extend(iter::from_fn(|| {
                     if cubes < cubes_2_spawn {
                         cubes += 1;
-                        Some(Point::new())
+                        Some(ColorPoint::new())
                     } else {
                         None
                     }
@@ -91,6 +99,28 @@ impl Waveform {
             Ordering::Equal => {}
         }
     }
+}
+
+fn send_buffer_to_color_points(send_buffer: &Array2<u8>) -> Vec<ColorPoint> {
+    send_buffer
+        .axis_iter(Axis(0))
+        .map(|col| ColorPoint {
+            color: Vec3::new(
+                col[0] as f32 / 255.0,
+                col[1] as f32 / 255.0,
+                col[2] as f32 / 255.0,
+            ),
+        })
+        .collect()
+}
+
+fn mel_values_to_color_points(mel_values: &Array1<f64>) -> Vec<ColorPoint> {
+    mel_values
+        .iter()
+        .map(|e| ColorPoint {
+            color: Vec3::new(*e as f32 / 255.0, 0.0, 0.0),
+        })
+        .collect()
 }
 
 impl<Message> shader::Program<Message> for Waveform {
@@ -117,7 +147,7 @@ pub struct Primitive {
 
 impl Primitive {
     pub fn new(
-        points: &[Point],
+        points: &[ColorPoint],
         display_mode: WaveformDisplayMode,
         bounds: Rectangle<f32>,
     ) -> Self {
@@ -158,11 +188,7 @@ impl shader::Primitive for Primitive {
         _viewport: &Viewport,
     ) {
         if !storage.has::<Pipeline>() {
-            storage.store(Pipeline::new(
-                device,
-                format,
-                self.raw_points.len() as u32,
-            ));
+            storage.store(Pipeline::new(device, format, self.raw_points.len() as u32));
         }
 
         let pipeline = storage.get_mut::<Pipeline>().unwrap();

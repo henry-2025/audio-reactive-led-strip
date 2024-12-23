@@ -11,6 +11,7 @@ pub struct ESP8266Conn {
     socket: UdpSocket,
     gamma_table: Option<Array1<u8>>,
     address: SocketAddr,
+    current_pixels: Array2<u8>,
 }
 
 impl ESP8266Conn {
@@ -26,6 +27,7 @@ impl ESP8266Conn {
                 true => Some(arr1(GAMMA_TABLE)),
                 false => None,
             },
+            current_pixels: Array2::zeros((config.n_points as usize, 3)),
         })
     }
 
@@ -42,29 +44,29 @@ impl ESP8266Conn {
     ///     r (0 to 255): Red value of LED
     ///     g (0 to 255): Green value of LED
     ///     b (0 to 255): Blue value of LED
-    pub fn update(
-        &self,
-        pixels: &mut Array2<u8>,
-        pixels_prev: &Array2<u8>,
+    pub fn send_buffer_to_device(
+        &mut self,
+        new_pixels: &Array2<u8>,
     ) -> Result<usize, io::Error> {
+        let mut new_pixels = new_pixels.clone();
         // if the gamma table exists, map it to pixel array
         if let Some(gamma) = &self.gamma_table {
-            pixels.map_inplace(|x| *x = gamma[*x as usize]);
+            new_pixels.map_inplace(|x| *x = gamma[*x as usize]);
         }
 
-        let send_buffer = self.create_send_buffer(pixels, pixels_prev);
-
+        let send_buffer = self.create_send_buffer(&new_pixels);
+        self.current_pixels.assign(&new_pixels);
         self.socket.send_to(&send_buffer, self.address)
     }
 
-    // construct the flat buffer of (i, r, g, b) indices
-    fn create_send_buffer(&self, pixels: &Array2<u8>, pixels_prev: &Array2<u8>) -> Vec<u8> {
-        pixels
+    // construct the flat buffer of (index, r, g, b)
+    fn create_send_buffer(&self, new_pixels: &Array2<u8>) -> Vec<u8> {
+        new_pixels
             .axis_iter(Axis(0))
             .enumerate()
             .filter_map(|(idx, val)| {
                 if val
-                    == pixels_prev
+                    == self.current_pixels
                         .slice_axis(Axis(0), Slice::new(idx as isize, Some(idx as isize + 1), 1))
                         .into_shape(3)
                         .unwrap()
@@ -99,20 +101,22 @@ mod test {
     fn test_create_send_buffer() {
         let num_different = 15;
         // create some buffers that are duplicates of one another and modify the pixels in one assert that the length of the send buffer is what we expect
-        let pixels_prev: Array2<u8> = Array::random((255, 3), Uniform::new(0., 255.))
+        let current_pixels: Array2<u8> = Array::random((255, 3), Uniform::new(0., 255.))
             .to_owned()
             .map(|x| *x as u8);
-        let mut pixels = pixels_prev.clone();
-        pixels
+        let mut new_pixels = current_pixels.clone();
+        new_pixels
             .slice_mut(ndarray::s![10..10 + num_different, ..])
             .map_mut(|x| *x += 1);
 
-        let conn = ESP8266Conn::new(&Config::default()).unwrap();
-        let send_buffer = conn.create_send_buffer(&pixels, &pixels_prev);
+        let mut conn = ESP8266Conn::new(&Config::default()).unwrap();
+        conn.current_pixels = current_pixels;
+
+        let send_buffer = conn.create_send_buffer(&new_pixels);
         assert_eq!(num_different * 4, send_buffer.len());
         // compare actual buffers
         assert_eq!(
-            pixels
+            new_pixels
                 .slice(ndarray::s![10..10 + num_different, ..])
                 .into_shape(num_different * 3)
                 .unwrap()
@@ -147,17 +151,19 @@ mod test {
             .map_mut(|x| *x += 1);
 
         // write an update to the connection
-        let send = ESP8266Conn::new(&Config {
+        let mut send = ESP8266Conn::new(&Config {
             device_ip: String::from("127.0.0.1"),
             device_port: 7777,
             software_gamma_correction: false,
             ..Default::default()
         })
         .unwrap();
+        send.current_pixels = pixels_prev;
+
         let recv = UdpSocket::bind("127.0.0.1:7777").unwrap();
         let mut buf: Vec<u8> = vec![0; 2048];
         let send_len = send
-            .update(&mut pixels.clone(), &mut pixels_prev.clone())
+            .send_buffer_to_device(&mut pixels.clone())
             .unwrap();
         let recv_len = recv.recv(&mut buf).unwrap();
         assert_eq!(send_len, num_different * 4);
