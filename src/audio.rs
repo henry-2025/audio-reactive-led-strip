@@ -1,6 +1,6 @@
 use std::{
     fmt::{Debug, Display},
-    thread::{self, Thread},
+    thread::{self},
     time::{Duration, Instant},
 };
 
@@ -12,7 +12,6 @@ use cpal::{
 use iced::futures::{
     self,
     channel::mpsc::{channel, Receiver, Sender},
-    future::select,
     select, SinkExt, StreamExt,
 };
 
