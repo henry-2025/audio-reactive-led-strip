@@ -31,7 +31,6 @@ pub enum GuiMessage {
     PresetSelected(Preset),
     WindowClose(window::Id),
     WaveformDisplayModeSelected(WaveformDisplayMode),
-    AudioCaptureThread(thread::Thread),
     AudioCaptureTx(Sender<GuiMessage>),
     RecordingDeviceSelected(RecordingDevice),
     SliderUpdated((u32, SliderSide)),
@@ -49,7 +48,6 @@ pub struct Gui {
     esp_device: ESP8266Conn,
     recording_device: Option<RecordingDevice>,
     all_recording_devices: Vec<RecordingDevice>,
-    audio_capture_thread: Option<thread::Thread>,
     audio_capture_tx: Option<Sender<GuiMessage>>,
     ignore_io_errors: bool,
 }
@@ -73,24 +71,13 @@ impl Gui {
             )),
             all_recording_devices: audio::get_recording_devices(),
             config,
-            audio_capture_thread: None,
             audio_capture_tx: None,
             ignore_io_errors: false,
         }
     }
 
     fn close_and_maybe_stop_render_thread(&self, id: window::Id) -> Task<GuiMessage> {
-        let thread = self
-            .audio_capture_thread
-            .as_ref()
-            .expect("renderer thread should be set before close request sent")
-            .clone();
-        window::get_oldest().and_then(move |oldest_id| {
-            if oldest_id == id {
-                thread.unpark();
-            }
-            window::close::<GuiMessage>(id)
-        })
+        window::close::<GuiMessage>(id)
     }
 
     pub fn update(&mut self, message: GuiMessage) -> Task<GuiMessage> {
@@ -114,11 +101,7 @@ impl Gui {
                 self.waveform.set_mode(mode);
                 Task::none()
             }
-            GuiMessage::AudioCaptureThread(thread) => {
-                self.audio_capture_thread = Some(thread);
-                Task::none()
-            }
-            GuiMessage::AudioBuffer(vec) => {
+                      GuiMessage::AudioBuffer(vec) => {
                 self.dsp.update_audio(&vec);
                 let device_buffer = self.dsp.get_send_buffer();
                 let mel_display = self.dsp.get_current_mel_display();
