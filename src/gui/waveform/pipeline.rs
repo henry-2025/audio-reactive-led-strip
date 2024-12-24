@@ -18,6 +18,7 @@ pub struct Pipeline {
     mel_pipeline: wgpu::RenderPipeline,
     vertices: wgpu::Buffer,
     points: Buffer,
+    mel_points: Buffer,
     n_points: u32,
     n_mel_bands: u32,
     indices: wgpu::Buffer,
@@ -42,7 +43,14 @@ impl Pipeline {
         // points data
         let points_buffer = Buffer::new(
             device,
-            "instance buffer",
+            "display instance buffer",
+            std::mem::size_of::<point::Raw>() as u64,
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+
+        let mel_points_buffer = Buffer::new(
+            device,
+            "mel instance buffer",
             std::mem::size_of::<point::Raw>() as u64,
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
@@ -180,7 +188,6 @@ impl Pipeline {
             multiview: None,
         });
 
-
         let mel_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mel pipeline shader"),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
@@ -231,6 +238,7 @@ impl Pipeline {
             channels_pipeline,
             mel_pipeline,
             points: points_buffer,
+            mel_points: mel_points_buffer,
             vertices,
             uniforms,
             indices,
@@ -247,16 +255,24 @@ impl Pipeline {
         uniforms: &Uniforms,
         n_points: u32,
         points: &[point::Raw],
+        n_mel_bands: u32,
+        mel_points: &[point::Raw],
     ) {
         //resize points vertex buffer if poitns amount changed
         self.n_points = n_points;
         let new_size = n_points as usize * std::mem::size_of::<point::Raw>();
         self.points.resize(device, new_size as u64);
+
+        self.n_mel_bands = n_mel_bands;
+        let new_mel_points = n_mel_bands as usize * std::mem::size_of::<point::Raw>();
+        self.mel_points.resize(device, new_mel_points as u64);
+
         // update uniforms
         queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(uniforms));
 
-        //always write new point data since they are constantly changing color
+        //always write new point data since they are constantly changing color and mel display
         queue.write_buffer(&self.points.raw, 0, bytemuck::cast_slice(points));
+        queue.write_buffer(&self.mel_points.raw, 0, bytemuck::cast_slice(mel_points));
     }
 
     pub fn render(
@@ -268,7 +284,7 @@ impl Pipeline {
     ) {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("cubes.pipeline.pass"),
+                label: Some("waveform.display.pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target,
                     resolve_target: None,
@@ -287,14 +303,18 @@ impl Pipeline {
             pass.set_vertex_buffer(0, self.vertices.slice(..));
             pass.set_vertex_buffer(1, self.points.raw.slice(..));
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint16);
+
+            // draw the display buffer
             match display_mode {
                 WaveformDisplayMode::Colors => pass.set_pipeline(&self.pipeline),
                 WaveformDisplayMode::RGBChannels => pass.set_pipeline(&self.channels_pipeline),
             }
             pass.draw_indexed(0..6, 0, 0..self.n_points as u32);
 
-            //pass.set_pipeline(&self.mel_pipeline);
-            //pass.draw_indexed(0..6, 0, self.n_points..self.n_points + self.n_mel_bands as u32);
+            // draw the mel buffer
+            pass.set_vertex_buffer(1, self.mel_points.raw.slice(..));
+            pass.set_pipeline(&self.mel_pipeline);
+            pass.draw_indexed(0..6, 0, 0..self.n_mel_bands as u32);
         }
     }
 }

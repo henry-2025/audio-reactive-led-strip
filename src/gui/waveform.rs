@@ -213,6 +213,8 @@ impl shader::Primitive for Primitive {
             &self.uniforms,
             self.raw_points.len() as u32,
             &self.raw_points,
+            self.raw_mel_points.len() as u32,
+            &self.raw_mel_points,
         );
     }
 
