@@ -5,7 +5,7 @@ use clap::Parser;
 use cpal::traits::HostTrait;
 use double_slider::{DoubleSlider, SliderSide};
 use iced::{
-    futures::Stream,
+    futures::{channel::mpsc::Sender, Stream},
     stream::channel,
     widget::{column, horizontal_space, pick_list, row, shader},
     window, Alignment, Length, Subscription, Task,
@@ -32,6 +32,7 @@ pub enum GuiMessage {
     WindowClose(window::Id),
     WaveformDisplayModeSelected(WaveformDisplayMode),
     AudioCaptureThread(thread::Thread),
+    AudioCaptureTx(Sender<GuiMessage>),
     RecordingDeviceSelected(RecordingDevice),
     SliderUpdated((u32, SliderSide)),
     AudioBuffer(Vec<f32>),
@@ -49,6 +50,7 @@ pub struct Gui {
     recording_device: Option<RecordingDevice>,
     all_recording_devices: Vec<RecordingDevice>,
     audio_capture_thread: Option<thread::Thread>,
+    audio_capture_tx: Option<Sender<GuiMessage>>,
     ignore_io_errors: bool,
 }
 
@@ -72,6 +74,7 @@ impl Gui {
             all_recording_devices: audio::get_recording_devices(),
             config,
             audio_capture_thread: None,
+            audio_capture_tx: None,
             ignore_io_errors: false,
         }
     }
@@ -132,7 +135,14 @@ impl Gui {
                 Task::none()
             }
             GuiMessage::RecordingDeviceSelected(recording_device) => {
-                self.recording_device = Some(recording_device);
+                self.recording_device = Some(recording_device.clone());
+                self.send_to_audio_capture_thread(GuiMessage::RecordingDeviceSelected(
+                    recording_device,
+                ));
+                Task::none()
+            }
+            GuiMessage::AudioCaptureTx(tx) => {
+                self.audio_capture_tx = Some(tx);
                 Task::none()
             }
         }
@@ -208,9 +218,9 @@ impl Gui {
         recording_device: RecordingDevice,
     ) -> impl Stream<Item = GuiMessage> {
         channel(1, move |audio_tx| async move {
-            let audio_stream: AudioStream =
+            let mut audio_stream: AudioStream =
                 AudioStream::new(audio_tx, fps, mic_rate, recording_device.clone());
-            audio_stream.start();
+            audio_stream.start().await;
         })
     }
 
@@ -229,6 +239,14 @@ impl Gui {
         println!("encountered unhandled io error and handling prompt");
         self.ignore_io_errors = true;
         Ok(0)
+    }
+
+    fn send_to_audio_capture_thread(&mut self, message: GuiMessage) {
+        self.audio_capture_tx
+            .as_mut()
+            .expect("audio capture tx should be set on this call")
+            .try_send(message)
+            .expect("message send to audio capture should succeed");
     }
 }
 

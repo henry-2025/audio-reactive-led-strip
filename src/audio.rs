@@ -1,6 +1,6 @@
 use std::{
     fmt::{Debug, Display},
-    thread,
+    thread::{self, Thread},
     time::{Duration, Instant},
 };
 
@@ -9,18 +9,26 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     InputCallbackInfo, SampleFormat, SampleRate, StreamError, SupportedStreamConfig,
 };
-use iced::futures::{self, channel::mpsc::Sender};
+use iced::futures::{
+    self,
+    channel::mpsc::{channel, Receiver, Sender},
+    future::select,
+    select, SinkExt, StreamExt,
+};
 
-use crate::gui::{waveform, GuiMessage};
+use crate::gui::GuiMessage;
 
 const RENDERER_AUDIO_STREAM_START_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub struct AudioStream {
     gui_update_tx: Sender<GuiMessage>,
-    audio_device: cpal::Device,
-    audio_config: cpal::SupportedStreamConfig,
+    audio_update_rx: Receiver<GuiMessage>,
+    cpal_thread_rx: Option<Receiver<Vec<f32>>>,
+    cpal_thread_handle: Option<thread::JoinHandle<()>>,
+    cpal_device: cpal::Device,
+    cpal_config: cpal::SupportedStreamConfig,
     frame_duration: Duration,
-    last_frame_capture: Instant,
+    mic_rate: u32,
 }
 
 #[derive(Clone)]
@@ -31,28 +39,106 @@ impl RecordingDevice {
     }
 }
 
+struct CpalStream {
+    stream_tx: Sender<Vec<f32>>,
+    last_frame_capture: Instant,
+    frame_duration: Duration,
+    cpal_device: cpal::Device,
+    cpal_config: cpal::SupportedStreamConfig,
+}
+
 impl AudioStream {
     pub fn new(
-        gui_update_tx: futures::channel::mpsc::Sender<GuiMessage>,
+        mut gui_update_tx: futures::channel::mpsc::Sender<GuiMessage>,
         update_fps: u32,
         mic_rate: u32,
         audio_device: RecordingDevice,
     ) -> Self {
-        let audio_config = get_audio_configs(&audio_device.0, mic_rate)[0].clone();
+        let audio_config = get_audio_configs(&audio_device.0, mic_rate).expect("default audio device could not be configured")[0].clone();
+        let (audio_update_tx, audio_update_rx) = channel(1);
+        gui_update_tx
+            .try_send(GuiMessage::AudioCaptureTx(audio_update_tx))
+            .expect("gui update tx should be open when the audio stream is created");
         Self {
             gui_update_tx,
-            audio_device: audio_device.0,
-            audio_config,
+            audio_update_rx,
+            cpal_thread_rx: None,
+            cpal_thread_handle: None,
+            cpal_device: audio_device.0,
+            cpal_config: audio_config,
             frame_duration: Duration::from_secs_f64(1. / update_fps as f64),
-            last_frame_capture: Instant::now(),
+            mic_rate,
         }
     }
 
-    pub fn start(mut self) -> thread::JoinHandle<()> {
+    pub async fn start(&mut self) {
+        self.start_cpal_stream(self.cpal_device.clone());
+
+        loop {
+            select! {
+                gui_update = self.audio_update_rx.select_next_some() => match gui_update {
+                    GuiMessage::RecordingDeviceSelected(recording_device) => {
+                        if let Err(err) = self.start_cpal_stream(recording_device.0) {
+                            println!("Encountered an error in device selection: {}. Select another audio device", err);
+                        }
+                    },
+                    default => println!("received message {:?} but thread does not know how to handle this", default),
+                },
+                updated_points = self.cpal_thread_rx.as_mut().expect("should be set at the time of start").select_next_some() => {
+                    let _ = self.gui_update_tx.send(GuiMessage::AudioBuffer(updated_points)).await;
+                },
+            }
+        }
+    }
+
+    fn maybe_shutdown_stream(&mut self) {
+        // let the audio capture thread terminate if it is already running
+        self.cpal_thread_handle.as_ref().map(|x| {
+            x.thread().unpark();
+            self.cpal_thread_rx = None;
+        });
+    }
+
+    fn start_cpal_stream(&mut self, cpal_device: cpal::Device) -> Result<(), NoDevicesError> {
+        if !(self.cpal_thread_handle.is_none() == self.cpal_thread_rx.is_none()) {
+            panic!("these two should either both be set or both empty");
+        }
+
+        self.maybe_shutdown_stream();
+        self.cpal_config = get_audio_configs(&cpal_device, self.mic_rate)?[0].clone();
+        self.cpal_device = cpal_device.clone();
+
+        let (tx, rx) = channel(1);
+        self.cpal_thread_rx = Some(rx);
+        let cpal_stream = CpalStream::new(
+            tx,
+            cpal_device,
+            self.cpal_config.clone(),
+            self.frame_duration,
+        );
+        self.cpal_thread_handle = Some(cpal_stream.start());
+        Ok(())
+    }
+}
+
+impl CpalStream {
+    pub fn new(
+        stream_tx: Sender<Vec<f32>>,
+        cpal_device: cpal::Device,
+        cpal_config: cpal::SupportedStreamConfig,
+        frame_duration: Duration,
+    ) -> Self {
+        Self {
+            stream_tx,
+            cpal_device,
+            cpal_config,
+            last_frame_capture: Instant::now(),
+            frame_duration,
+        }
+    }
+
+    pub fn start(self) -> thread::JoinHandle<()> {
         thread::spawn(move || {
-            self.gui_update_tx
-                .try_send(GuiMessage::AudioCaptureThread(thread::current()))
-                .expect("should be able to send current thread handle back to main");
             let stream = self.build_input_stream();
             stream.play().expect("error playing audio stream");
             thread::park();
@@ -60,12 +146,12 @@ impl AudioStream {
     }
 
     fn build_input_stream(mut self) -> cpal::Stream {
-        self.audio_device
+        self.cpal_device
             .clone()
             .build_input_stream(
-                &self.audio_config.config(),
+                &self.cpal_config.config(),
                 move |audio_data: &[f32], _: &InputCallbackInfo| {
-                    self.send_buffer_to_gui(audio_data);
+                    self.send_buffer_to_audio_stream(audio_data);
                 },
                 |e: StreamError| {
                     println!("Error received from input stream: {}", e);
@@ -75,11 +161,11 @@ impl AudioStream {
             .expect("Could not build audio stream")
     }
 
-    fn send_buffer_to_gui(&mut self, audio_data: &[f32]) {
+    fn send_buffer_to_audio_stream(&mut self, audio_data: &[f32]) {
         if self.last_frame_capture.elapsed() > self.frame_duration {
             self.last_frame_capture = Instant::now();
-            self.gui_update_tx
-                .try_send(GuiMessage::AudioBuffer(audio_data.to_vec()))
+            self.stream_tx
+                .try_send(audio_data.to_vec())
                 .expect("should be able to send audio data back to gui");
         }
     }
@@ -93,7 +179,19 @@ pub fn get_recording_devices() -> Vec<RecordingDevice> {
         .collect()
 }
 
-fn get_audio_configs(device: &cpal::Device, mic_rate: u32) -> Vec<SupportedStreamConfig> {
+#[derive(Debug)]
+struct NoDevicesError(String);
+
+impl Display for NoDevicesError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+fn get_audio_configs(
+    device: &cpal::Device,
+    mic_rate: u32,
+) -> Result<Vec<SupportedStreamConfig>, NoDevicesError> {
     let configs: Vec<SupportedStreamConfig> = device
         .supported_input_configs()
         .unwrap()
@@ -117,12 +215,13 @@ fn get_audio_configs(device: &cpal::Device, mic_rate: u32) -> Vec<SupportedStrea
         })
         .collect();
     if configs.is_empty() {
-        panic!(
+        Err(NoDevicesError(format!(
             "Could not create the intended audio input config: 1 channel, {}Hz, f32 format",
             mic_rate
-        );
+        )))
+    } else {
+        Ok(configs)
     }
-    configs
 }
 
 impl Display for RecordingDevice {
