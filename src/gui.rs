@@ -10,7 +10,7 @@ use iced::{
     widget::{column, horizontal_space, pick_list, row, shader},
     window, Alignment, Length, Subscription, Task,
 };
-use std::{io, thread};
+use std::io;
 use waveform::Waveform;
 use waveform::WaveformDisplayMode;
 
@@ -101,7 +101,7 @@ impl Gui {
                 self.waveform.set_mode(mode);
                 Task::none()
             }
-                      GuiMessage::AudioBuffer(vec) => {
+            GuiMessage::AudioBuffer(vec) => {
                 self.dsp.update_audio(&vec);
                 let device_buffer = self.dsp.get_send_buffer();
                 let mel_display = self.dsp.get_current_mel_display();

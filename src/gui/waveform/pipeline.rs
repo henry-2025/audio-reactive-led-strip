@@ -20,7 +20,7 @@ pub struct Pipeline {
     points: Buffer,
     mel_points: Buffer,
     n_points: u32,
-    n_mel_bands: u32,
+    n_mel_points: u32,
     indices: wgpu::Buffer,
     uniforms: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
@@ -31,7 +31,7 @@ impl Pipeline {
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         n_points: u32,
-        n_mel_bands: u32,
+        n_mel_points: u32,
     ) -> Self {
         // square instance data
         let vertices = device.create_buffer_init(&BufferInitDescriptor {
@@ -244,7 +244,7 @@ impl Pipeline {
             indices,
             uniform_bind_group,
             n_points,
-            n_mel_bands,
+            n_mel_points,
         }
     }
 
@@ -255,7 +255,7 @@ impl Pipeline {
         uniforms: &Uniforms,
         n_points: u32,
         points: &[point::Raw],
-        n_mel_bands: u32,
+        n_mel_points: u32,
         mel_points: &[point::Raw],
     ) {
         //resize points vertex buffer if poitns amount changed
@@ -263,8 +263,8 @@ impl Pipeline {
         let new_size = n_points as usize * std::mem::size_of::<point::Raw>();
         self.points.resize(device, new_size as u64);
 
-        self.n_mel_bands = n_mel_bands;
-        let new_mel_points = n_mel_bands as usize * std::mem::size_of::<point::Raw>();
+        self.n_mel_points = n_mel_points;
+        let new_mel_points = n_mel_points as usize * std::mem::size_of::<point::Raw>();
         self.mel_points.resize(device, new_mel_points as u64);
 
         // update uniforms
@@ -314,7 +314,7 @@ impl Pipeline {
             // draw the mel buffer
             pass.set_vertex_buffer(1, self.mel_points.raw.slice(..));
             pass.set_pipeline(&self.mel_pipeline);
-            pass.draw_indexed(0..6, 0, 0..self.n_mel_bands as u32);
+            pass.draw_indexed(0..6, 0, 0..self.n_mel_points as u32);
         }
     }
 }

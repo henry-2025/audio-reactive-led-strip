@@ -1,7 +1,8 @@
 struct Uniforms {
     width: f32,
     height: f32,
-    n_points: u32
+    n_points: u32,
+    n_mel_points: u32,
 }
 
 struct Vertex {
