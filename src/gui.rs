@@ -2,7 +2,6 @@ mod double_slider;
 pub mod waveform;
 
 use clap::Parser;
-use cpal::traits::HostTrait;
 use double_slider::{DoubleSlider, SliderSide};
 use iced::{
     futures::{channel::mpsc::Sender, Stream},
@@ -20,7 +19,7 @@ use crate::{
     dsp::Preset,
 };
 use crate::{
-    audio::AudioStream,
+    audio::AudioStreamManager,
     config::{load_config, Config, DEFAULT_CONFIG_PATH},
     dsp::Dsp,
     led::ESP8266Conn,
@@ -58,18 +57,14 @@ impl Gui {
         Self {
             waveform: Waveform::new(waveform_display_mode),
             selected_preset: Some(Preset::DEFAULT),
-            selected_waveform_display: Some(waveform_display_mode),
+            selected_waveform_display: Some(WaveformDisplayMode::DEFAULT),
             left_slider: config.left_slider_start,
             right_slider: config.right_slider_start,
             dsp: Dsp::new(&config),
             esp_device: ESP8266Conn::new(&config)
                 .expect("esp8266 connection should have been made"),
-            recording_device: Some(RecordingDevice::new(
-                cpal::default_host()
-                    .default_input_device()
-                    .expect("no default input device found"),
-            )),
-            all_recording_devices: audio::get_recording_devices(),
+            recording_device: Some(audio::get_default_recording_device(&config)),
+            all_recording_devices: audio::get_recording_devices(&config),
             config,
             audio_capture_tx: None,
             ignore_io_errors: false,
@@ -124,7 +119,11 @@ impl Gui {
                 ));
                 Task::none()
             }
-            GuiMessage::AudioCaptureTx(tx) => {
+            GuiMessage::AudioCaptureTx(mut tx) => {
+                tx.try_send(GuiMessage::RecordingDeviceSelected(
+                    self.recording_device.as_ref().unwrap().clone(),
+                ))
+                .expect("want to send recording device to render thread");
                 self.audio_capture_tx = Some(tx);
                 Task::none()
             }
@@ -181,28 +180,13 @@ impl Gui {
     pub fn subscription(&self) -> iced::Subscription<GuiMessage> {
         Subscription::batch(vec![
             window::close_requests().map(GuiMessage::WindowClose),
-            Subscription::run_with_id(
-                1,
-                Self::start_new_audio_stream(
-                    self.config.fps,
-                    self.config.mic_rate,
-                    self.recording_device
-                        .as_ref()
-                        .expect("this should always be set")
-                        .clone(),
-                ),
-            ),
+            Subscription::run_with_id(1, Self::start_new_audio_stream()),
         ])
     }
 
-    fn start_new_audio_stream(
-        fps: u32,
-        mic_rate: u32,
-        recording_device: RecordingDevice,
-    ) -> impl Stream<Item = GuiMessage> {
+    fn start_new_audio_stream() -> impl Stream<Item = GuiMessage> {
         channel(1, move |audio_tx| async move {
-            let mut audio_stream: AudioStream =
-                AudioStream::new(audio_tx, fps, mic_rate, recording_device.clone());
+            let mut audio_stream: AudioStreamManager = AudioStreamManager::new(audio_tx);
             audio_stream.start().await;
         })
     }

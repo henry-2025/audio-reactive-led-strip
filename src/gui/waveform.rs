@@ -21,10 +21,12 @@ pub enum WaveformDisplayMode {
 }
 
 impl WaveformDisplayMode {
-    pub const ALL: [WaveformDisplayMode; 2] = [
-        WaveformDisplayMode::Colors,
-        WaveformDisplayMode::RGBChannels,
+    pub const ALL: [Self; 2] = [
+        Self::Colors,
+        Self::RGBChannels,
     ];
+
+    pub const DEFAULT: Self = Self::Colors;
 }
 
 impl Display for WaveformDisplayMode {
