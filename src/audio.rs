@@ -150,10 +150,22 @@ impl CpalStream {
     fn capture_audio_frame(&mut self, audio_data: &[f32]) {
         if self.last_frame_capture.elapsed() > self.recording_device.frame_duration {
             self.last_frame_capture = Instant::now();
+
+            let audio_data_vec: Vec<f32>;
+            if self.recording_device.config.config().channels == 2 {
+                audio_data_vec = Self::get_left_channel(audio_data);
+            } else {
+                audio_data_vec = audio_data.to_vec();
+            }
+
             self.stream_tx
-                .try_send(audio_data.to_vec())
+                .try_send(audio_data_vec)
                 .expect("should be able to send audio data back to gui");
         }
+    }
+
+    fn get_left_channel(audio_data: &[f32]) -> Vec<f32> {
+        audio_data.to_vec().into_iter().step_by(2).collect()
     }
 }
 
