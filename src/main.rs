@@ -1,9 +1,9 @@
 mod args;
+mod audio;
 mod config;
 mod dsp;
 mod gamma_table;
 mod led;
-mod audio;
 
 use gui::Gui;
 
@@ -17,6 +17,7 @@ pub fn main() -> iced::Result {
     {
         iced::application("Audio Reactive Renderer", Gui::update, Gui::view)
             .subscription(Gui::subscription)
+            .theme(|_| iced::Theme::Dark)
             .exit_on_close_request(false)
             .run()
     }
