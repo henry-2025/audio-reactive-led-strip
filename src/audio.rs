@@ -1,5 +1,7 @@
 use std::{
-    fmt::{Debug, Display}, thread::{self}, time::{Duration, Instant}
+    fmt::{Debug, Display},
+    thread::{self},
+    time::{Duration, Instant},
 };
 
 use cpal::{
@@ -20,7 +22,7 @@ const RENDERER_AUDIO_STREAM_START_TIMEOUT: Duration = Duration::from_secs(1);
 pub struct AudioStreamManager {
     gui_update_tx: Sender<GuiMessage>,
     audio_update_rx: Receiver<GuiMessage>,
-    cpal_thread_rx: Option<Receiver<Vec<f32>>>,
+    cpal_thread_rx: Option<Receiver<Channels>>,
     cpal_thread_handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -45,10 +47,13 @@ impl RecordingDevice {
 }
 
 struct CpalStream {
-    stream_tx: Sender<Vec<f32>>,
+    stream_tx: Sender<Channels>,
     last_frame_capture: Instant,
     recording_device: RecordingDevice,
 }
+
+#[derive(Debug, Clone)]
+struct Channels(Vec<f32>, Option<Vec<f32>>);
 
 impl AudioStreamManager {
     pub fn new(mut gui_update_tx: futures::channel::mpsc::Sender<GuiMessage>) -> Self {
@@ -113,7 +118,7 @@ impl AudioStreamManager {
 }
 
 impl CpalStream {
-    pub fn new(stream_tx: Sender<Vec<f32>>, recording_device: RecordingDevice) -> Self {
+    pub fn new(stream_tx: Sender<Channels>, recording_device: RecordingDevice) -> Self {
         Self {
             stream_tx,
             recording_device,
@@ -151,21 +156,21 @@ impl CpalStream {
         if self.last_frame_capture.elapsed() > self.recording_device.frame_duration {
             self.last_frame_capture = Instant::now();
 
-            let audio_data_vec: Vec<f32>;
-            if self.recording_device.config.config().channels == 2 {
-                audio_data_vec = Self::get_left_channel(audio_data);
-            } else {
-                audio_data_vec = audio_data.to_vec();
-            }
-
             self.stream_tx
-                .try_send(audio_data_vec)
+                .try_send(self.get_channel_audio(audio_data))
                 .expect("should be able to send audio data back to gui");
         }
     }
 
-    fn get_left_channel(audio_data: &[f32]) -> Vec<f32> {
-        audio_data.to_vec().into_iter().step_by(2).collect()
+    fn get_channel_audio(&self, audio_data: &[f32]) -> Channels {
+        if self.recording_device.config.config().channels == 2 {
+            Channels(
+                audio_data.iter().cloned().step_by(2).collect(),
+                Some(audio_data[1..].iter().cloned().step_by(2).collect()),
+            )
+        } else {
+            Channels(audio_data.to_vec(), None)
+        }
     }
 }
 

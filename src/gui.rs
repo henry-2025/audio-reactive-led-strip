@@ -33,7 +33,7 @@ pub enum GuiMessage {
     AudioCaptureTx(Sender<GuiMessage>),
     RecordingDeviceSelected(RecordingDevice),
     SliderUpdated((u32, SliderSide)),
-    AudioBuffer(Vec<f32>),
+    AudioBuffer(audio::Channels),
 }
 
 pub struct Gui {
