@@ -1,19 +1,16 @@
 use std::{
-    fmt::{Debug, Display},
-    thread::{self},
-    time::{Duration, Instant},
+    fmt::{Debug, Display}, thread::{self}, time::{Duration, Instant}
 };
 
 use cpal::{
     default_host,
     traits::{DeviceTrait, HostTrait, StreamTrait},
     InputCallbackInfo, SampleFormat, SampleRate, StreamError, SupportedStreamConfig,
-    SupportedStreamConfigRange,
 };
 use iced::futures::{
     self,
     channel::mpsc::{channel, Receiver, Sender},
-    select, FutureExt, SinkExt, StreamExt,
+    select, SinkExt, StreamExt,
 };
 
 use crate::{config::Config, gui::GuiMessage};
@@ -72,7 +69,7 @@ impl AudioStreamManager {
         loop {
             select! {
                 gui_update = self.audio_update_rx.select_next_some() => match gui_update {
-                    GuiMessage::RecordingDeviceSelected(recording_device) => self.start_cpal_stream(recording_device) ,
+                    GuiMessage::RecordingDeviceSelected(recording_device) => self.start_cpal_stream(recording_device),
                     default => println!("render thread loop received message {:?} but thread does not know how to handle this", default),
                 },
                 updated_points = self.cpal_thread_rx.as_mut().expect("should be set at the time of start").select_next_some() => {
@@ -83,7 +80,6 @@ impl AudioStreamManager {
     }
 
     async fn init_render_thread(&mut self) {
-        println!("starting render thread init");
         while let Some(message) = self.audio_update_rx.next().await {
             match message {
                 GuiMessage::RecordingDeviceSelected(recording_device) => {
@@ -93,14 +89,12 @@ impl AudioStreamManager {
                     default => println!("render thread init received message {:?} but thread does not know how to handle this", default),
             }
         }
-        println!("completed render thread init");
     }
 
     fn maybe_shutdown_stream(&mut self) {
         // let the audio capture thread terminate if it is already running
-        self.cpal_thread_handle.as_ref().map(|x| {
-            x.thread().unpark();
-            self.cpal_thread_rx = None;
+        self.cpal_thread_handle.as_ref().map(|handle| {
+            handle.thread().unpark();
         });
     }
 
@@ -132,6 +126,7 @@ impl CpalStream {
             let stream = self.build_input_stream();
             stream.play().expect("error playing audio stream");
             thread::park();
+            stream.pause().expect("could not pause audio stream");
         })
     }
 
@@ -142,7 +137,7 @@ impl CpalStream {
             .build_input_stream(
                 &self.recording_device.config.config(),
                 move |audio_data: &[f32], _: &InputCallbackInfo| {
-                    self.send_buffer_to_audio_stream(audio_data);
+                    self.capture_audio_frame(audio_data);
                 },
                 |e: StreamError| {
                     println!("Error received from input stream: {}", e);
@@ -152,7 +147,7 @@ impl CpalStream {
             .expect("Could not build audio stream")
     }
 
-    fn send_buffer_to_audio_stream(&mut self, audio_data: &[f32]) {
+    fn capture_audio_frame(&mut self, audio_data: &[f32]) {
         if self.last_frame_capture.elapsed() > self.recording_device.frame_duration {
             self.last_frame_capture = Instant::now();
             self.stream_tx
@@ -221,7 +216,7 @@ fn get_audio_config(
             //TODO: for now, mac only supports floating-point sampling formats. In the future,
             //will want to compile to support i16 and u16 formats as well. Will be a good
             //case for pattern matching
-            if sample_rates.sample_format() == SampleFormat::F32 && sample_rates.channels() == 1 {
+            if sample_rates.sample_format() == SampleFormat::F32 && sample_rates.channels() <= 2 {
                 Some(sample_rates)
             } else {
                 None
@@ -232,12 +227,13 @@ fn get_audio_config(
     if configs.is_empty() {
         if let Some(rate) = mic_rate {
             Err(NoDevicesError(format!(
-                "Could not create the intended audio input config: 1 channel, {}Hz, f32 format",
+                "Could not create the intended audio input config: 1 or 2 channels, {}Hz, f32 format",
                 rate
             )))
         } else {
             Err(NoDevicesError(
-                "Could not create the any audio input config with f32 format".to_string(),
+                "Could not create the any audio input config: 1 or 2 channels, f32 format"
+                    .to_string(),
             ))
         }
     } else {
