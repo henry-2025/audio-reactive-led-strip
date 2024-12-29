@@ -103,11 +103,6 @@ impl Dsp {
         }
     }
 
-
-    pub fn get_mel_smoothing(&self) -> &Array1<f64>{
-        &self.mel_smoothing.current
-    }
-
     pub fn update_audio(&mut self, audio_raw: &[f32]) {
         // move in new audio samples to buffer (back is newest)
         let audio_arr = arr1(audio_raw).mapv(f64::from);
