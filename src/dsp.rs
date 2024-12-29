@@ -201,7 +201,7 @@ impl Dsp {
         // scroll display
         self.current_display.assign(&ndarray::concatenate![
             Axis(0),
-            filter_display_buffer.slice(s![(self.n_points % 2) as usize..,..;-1]),
+            filter_display_buffer.slice(s![(self.n_points % 2) as usize..; -1,..]),
             filter_display_buffer,
         ]);
     }
@@ -238,7 +238,7 @@ impl Dsp {
 
         self.current_display.assign(&ndarray::concatenate![
             Axis(0),
-            display_slice.slice(s![(self.n_points % 2) as usize..,..;-1]),
+            display_slice.slice(s![(self.n_points % 2) as usize..; -1,..]),
             display_slice
         ]);
     }
