@@ -1,4 +1,4 @@
-use std::{fmt::Display, sync::Arc};
+use std::{cmp::min, fmt::Display, sync::Arc};
 
 use ndarray::{arr1, concatenate, s, Array, Array1, Array2, Axis, Dimension, Ix1, Ix2, NewAxis};
 use rustfft::{
@@ -104,18 +104,18 @@ impl Dsp {
     }
 
     pub fn update_audio(&mut self, audio_raw: &[f32]) {
-        // move in new audio samples to buffer (back is newest)
         let audio_arr = arr1(audio_raw).mapv(f64::from);
-
         self.update_rolling_history(audio_arr);
         self.apply_transform();
     }
 
     fn update_rolling_history(&mut self, new_data: Array1<f64>) {
+        // first sample in the sample buffer is the most recent sample in time, this buffer
+        // gets updated from behind
         self.rolling_history = concatenate![
             Axis(0),
-            new_data,
-            self.rolling_history.slice(s![new_data.shape()[0]..])
+            self.rolling_history.slice(s![new_data.shape()[0]..]),
+            new_data
         ];
     }
 
@@ -124,7 +124,6 @@ impl Dsp {
         let audio_data_rfft = self.exec_rfft(&self.rolling_history);
         let mut audio_data_mel = self.get_mel_repr(&audio_data_rfft);
         self.gain_and_smooth(&mut audio_data_mel);
-
         self.apply_preset();
     }
 
@@ -201,40 +200,41 @@ impl Dsp {
         ]);
     }
     fn visualize_power(&mut self) {
-        let mut y = self.mel_smoothing.current.clone();
-        self.gain.update(&y);
-        let mut display_slice = self
+        let mut smoothed_mel = self.mel_smoothing.current.clone();
+        self.gain.update(&smoothed_mel);
+        let mut right_display = self
             .current_display
             .slice(s![(self.n_points / 2) as usize.., ..])
             .to_owned();
 
         // y /= gain.value
         // y *= float(config.n_pixels // 2) - 1)
-        y.zip_mut_with(&self.gain.current, |y, g| {
+        smoothed_mel.zip_mut_with(&self.gain.current, |y, g| {
             *y *= ((self.n_points / 2) - 1) as f64 / g;
         });
 
         // map color channels according to energy in different frequency bands
         let scale = 0.9;
-        for i in 0..3 {
-            let s = y
-                .slice(s![i * y.shape()[0] / 3..(i + 1) * y.shape()[0] / 3])
+        let band_width = smoothed_mel.shape()[0] / 3;
+        for band in 0..3 {
+            let band_slice = smoothed_mel
+                .slice(s![band * band_width / 3..(band + 1) * band_width])
                 .map(|x| x.powf(scale));
-            let mean = s.mean().unwrap() as usize;
-            display_slice.slice_mut(s![..mean, i]).fill(255.0);
-            display_slice.slice_mut(s![mean.., i]).fill(0.0);
+            let mean = min(right_display.shape()[0], band_slice.mean().unwrap() as usize);
+            right_display.slice_mut(s![..mean, band]).fill(255.0);
+            right_display.slice_mut(s![mean.., band]).fill(0.0);
         }
 
-        self.p_filt.update(&display_slice);
-        display_slice.map_inplace(|x| {
+        self.p_filt.update(&right_display);
+        right_display.map_inplace(|x| {
             *x = x.round();
         });
-        display_slice.assign(&correlate_1d(&display_slice, &self.gaussian_kernel2));
+        right_display.assign(&correlate_1d(&right_display, &self.gaussian_kernel2));
 
         self.current_display.assign(&ndarray::concatenate![
             Axis(0),
-            display_slice.slice(s![(self.n_points % 2) as usize..; -1,..]),
-            display_slice
+            right_display.slice(s![(self.n_points % 2) as usize..; -1,..]),
+            right_display
         ]);
     }
 
@@ -270,9 +270,12 @@ impl Dsp {
 
         let mel_stack = &ndarray::stack![Axis(1), r, g, b];
         let start = (self.n_points / 2) as usize - mel_stack.shape()[0] / 2;
-        let end = (self.n_points / 2) as usize + mel_stack.shape()[0] / 2 + mel_stack.shape()[0] % 2;
+        let end =
+            (self.n_points / 2) as usize + mel_stack.shape()[0] / 2 + mel_stack.shape()[0] % 2;
 
-        self.current_display.slice_mut(s![start..end,..]).assign(mel_stack);
+        self.current_display
+            .slice_mut(s![start..end, ..])
+            .assign(mel_stack);
     }
 
     pub fn exec_rfft(&self, buffer: &Array1<f64>) -> Array1<f64> {
