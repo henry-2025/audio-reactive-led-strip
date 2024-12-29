@@ -1,9 +1,9 @@
 mod args;
+mod audio;
 mod config;
 mod dsp;
 mod gamma_table;
 mod led;
-mod audio;
 
 use gui::Gui;
 
