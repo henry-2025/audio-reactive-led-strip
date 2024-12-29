@@ -114,8 +114,8 @@ impl Dsp {
     fn update_rolling_history(&mut self, new_data: Array1<f64>) {
         self.rolling_history = concatenate![
             Axis(0),
-            self.rolling_history.slice(s![new_data.shape()[0]..]),
-            new_data
+            new_data,
+            self.rolling_history.slice(s![new_data.shape()[0]..])
         ];
     }
 
@@ -534,7 +534,7 @@ mod test_dsp_functions {
         let mut config = Config::default();
         config.n_fft_bins = 16;
 
-        let dsp = Dsp::new(config);
+        let dsp = Dsp::new(&config);
 
         let input1 = arr1(&[
             1.18550208,
@@ -593,7 +593,7 @@ mod test_dsp_functions {
         let mut config = Config::default();
         config.n_fft_bins = 32;
         config.n_mel_bands = 8;
-        let dsp = Dsp::new(config);
+        let dsp = Dsp::new(&config);
 
         let fft_input_half = arr1(&[
             0.59944508, 0.35953482, 0.43607555, 1.81651546, 0.05219176, 0.06467918, 0.91489904,
@@ -646,7 +646,7 @@ mod test_dsp_functions {
         ]);
 
         let config = Config::default();
-        let dsp = Dsp::new(config);
+        let dsp = Dsp::new(&config);
         assert_abs_diff_eq!(
             dsp.gaussian_filter1d_single(&input),
             expected_output,
@@ -823,14 +823,16 @@ mod test_display_funcs {
 
     #[test]
     fn test_display_scroll() {
-        let mut display_buffer = arr2(&DISPLAY_BUFFER);
+        let display_buffer = arr2(&DISPLAY_BUFFER);
         let mut config = Config::default();
         config.n_points = display_buffer.shape()[0] as u8;
         config.n_mel_bands = 16;
 
-        let mut dsp = Dsp::new(config);
+        let mut dsp = Dsp::new(&config);
+        dsp.selected_preset = super::Preset::Scroll;
+        dsp.current_display = display_buffer;
         dsp.gain_and_smooth(&mut arr1(&MEL_UPDATE));
 
-        dsp.apply_transform(super::Preset::Scroll, &mut display_buffer);
+        dsp.apply_transform();
     }
 }
