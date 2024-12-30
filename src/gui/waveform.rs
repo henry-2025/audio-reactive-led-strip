@@ -120,7 +120,7 @@ fn mel_values_to_color_points(mel_values: &Array1<f64>) -> Vec<ColorPoint> {
     mel_values
         .iter()
         .map(|e| ColorPoint {
-            color: Vec3::new(*e as f32 / 255.0, 0.0, 0.0),
+            color: Vec3::new(*e as f32, 0.0, 0.0),
         })
         .collect()
 }

@@ -120,7 +120,6 @@ impl Dsp {
     }
 
     fn apply_transform(&mut self) {
-        // transform the audio to the frequency space and then to the mel spectrum
         let audio_data_rfft = self.exec_rfft(&self.rolling_history);
         let mut audio_data_mel = self.get_mel_repr(&audio_data_rfft);
         self.gain_and_smooth(&mut audio_data_mel);

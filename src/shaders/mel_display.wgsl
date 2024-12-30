@@ -23,7 +23,7 @@ struct Output {
 // do all constants in clip space
 const MAX_POINTS: f32 = 127.0;
 const POINT_WIDTH: f32 = 2.0 / MAX_POINTS;
-const POINT_HEIGHT: f32 = POINT_WIDTH * 10.0;
+const POINT_HEIGHT: f32 = POINT_WIDTH;
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
