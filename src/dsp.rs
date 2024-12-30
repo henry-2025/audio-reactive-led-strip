@@ -163,25 +163,14 @@ impl Dsp {
             .slice(s![(self.n_points / 2) as usize.., ..])
             .to_owned();
         let mut y = self.mel_smoothing.current.clone();
-        // y = y**2.0
         y.map_inplace(|x| *x = x.powi(2));
-        // update gain
         self.gain.update(&y);
-        // y /= gain.value
-        // y *= 255
         y.zip_mut_with(&self.gain.current, |y, g| *y = 255.0 * (*y) / g);
-
-        // scrolling effect
-        // p[1:, :] = p[:-1, :]
-        // p *= 0.98
         for i in 1..display_slice.shape()[0] - 1 {
             let left_pixels = display_slice.slice(s![i - 1, ..]).to_owned() * 0.98;
             display_slice.slice_mut(s![i, ..]).assign(&left_pixels);
         }
-        // apply gaussian filter
         let mut filter_display_buffer = correlate_1d(&display_slice, &self.gaussian_kernel1);
-
-        // create one new color originating at the center
         for i in 0..3 {
             let s = y.slice(s![i * y.shape()[0] / 3..(i + 1) * y.shape()[0] / 3]);
             let mut max: f64 = 0.0;
@@ -191,14 +180,13 @@ impl Dsp {
 
             filter_display_buffer[[0, i]] = max;
         }
-
-        // scroll display
         self.current_display.assign(&ndarray::concatenate![
             Axis(0),
             filter_display_buffer.slice(s![(self.n_points % 2) as usize..; -1,..]),
             filter_display_buffer,
         ]);
     }
+
     fn visualize_power(&mut self) {
         let mut smoothed_mel = self.mel_smoothing.current.clone();
         self.gain.update(&smoothed_mel);
@@ -206,14 +194,9 @@ impl Dsp {
             .current_display
             .slice(s![(self.n_points / 2) as usize.., ..])
             .to_owned();
-
-        // y /= gain.value
-        // y *= float(config.n_pixels // 2) - 1)
         smoothed_mel.zip_mut_with(&self.gain.current, |y, g| {
             *y *= ((self.n_points / 2) - 1) as f64 / g;
         });
-
-        // map color channels according to energy in different frequency bands
         let scale = 0.9;
         let band_width = smoothed_mel.shape()[0] / 3;
         for band in 0..3 {
@@ -224,7 +207,6 @@ impl Dsp {
             right_display.slice_mut(s![..mean, band]).fill(255.0);
             right_display.slice_mut(s![mean.., band]).fill(0.0);
         }
-
         self.p_filt.update(&right_display);
         right_display.map_inplace(|x| {
             *x = x.round();
@@ -255,15 +237,12 @@ impl Dsp {
         self.common_mode.update(&y);
         let diff = &y - &self.prev_spectrum;
         self.prev_spectrum.assign(&y);
-
-        // color channel mappings
         self.r_filt.update(&(&y - &self.common_mode.current));
         let r = &self.r_filt.current;
         let g = diff.map(|x| x.abs());
         self.b_filt.update(&y);
         let b = &self.b_filt.current;
 
-        // Mirror the color channels for symmetric output
         let r = ndarray::concatenate![Axis(0), r.slice(s![..;-1]).to_owned(), r.to_owned()];
         let g = ndarray::concatenate![Axis(0), g.slice(s![..;-1]), g];
         let b = ndarray::concatenate![Axis(0), b.slice(s![..;-1]).to_owned(), b.to_owned()];
