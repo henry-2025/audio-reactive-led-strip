@@ -94,7 +94,7 @@ impl Dsp {
                 config.max_freq_hz,
             ),
             mel_gain: ExpFilterArr::<Ix1>::new(config.n_mel_bands as usize, 0.1, 0.01, 0.99),
-            mel_smoothing: ExpFilterArr::<Ix1>::new(config.n_mel_bands as usize, 0.1, 0.5, 0.99),
+            mel_smoothing: ExpFilterArr::<Ix1>::new(config.n_mel_bands as usize, 0.1, 0.5, 0.7),
             fft: new_rfft(config.n_fft_bins),
             n_points: config.n_points,
             selected_preset: Preset::DEFAULT,
@@ -165,11 +165,10 @@ impl Dsp {
         y.map_inplace(|x| *x = x.powi(2));
         self.gain.update(&y);
         y.zip_mut_with(&self.gain.current, |y, g| *y = 255.0 * (*y) / g);
-        for i in 1..display_slice.shape()[0] - 1 {
-            let left_pixels = display_slice.slice(s![i - 1, ..]).to_owned() * 0.98;
-            display_slice.slice_mut(s![i, ..]).assign(&left_pixels);
-        }
-        let mut filter_display_buffer = correlate_1d(&display_slice, &self.gaussian_kernel1);
+        display_slice *= 0.97;
+
+        //let mut filter_display_buffer = correlate_1d(&display_slice, &self.gaussian_kernel1);
+        let mut center_pixels = Array2::<f64>::zeros((2 - self.n_points as usize % 2, 3));
         for i in 0..3 {
             let s = y.slice(s![i * y.shape()[0] / 3..(i + 1) * y.shape()[0] / 3]);
             let mut max: f64 = 0.0;
@@ -177,12 +176,13 @@ impl Dsp {
                 max = f64::max(max, *x);
             });
 
-            filter_display_buffer[[0, i]] = max;
+            center_pixels.slice_mut(s![.., i]).fill(max);
         }
         self.current_display.assign(&ndarray::concatenate![
             Axis(0),
-            filter_display_buffer.slice(s![(self.n_points % 2) as usize..; -1,..]),
-            filter_display_buffer,
+            display_slice.slice(s![..-1; -1,..]),
+            center_pixels,
+            display_slice.slice(s![..-1, ..]),
         ]);
     }
 
@@ -361,7 +361,6 @@ pub fn new_rfft(fft_size: u32) -> Arc<dyn Fft<f64>> {
  * mel\_x: the center frequencies of the mel bands
  */
 pub struct MelBank {
-    pub x: Array1<f64>,
     pub y: Array2<f64>,
 }
 
