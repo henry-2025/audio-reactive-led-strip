@@ -1,12 +1,13 @@
-from __future__ import print_function
-from __future__ import division
+from __future__ import division, print_function
+
 import time
-import numpy as np
-from scipy.ndimage.filters import gaussian_filter1d
+
 import config
-import microphone
 import dsp
 import led
+import microphone
+import numpy as np
+from scipy.ndimage import gaussian_filter1d
 
 _time_prev = time.time() * 1000.0
 """The previous time that the frames_per_second() function was called"""
@@ -44,6 +45,7 @@ def frames_per_second():
 def memoize(function):
     """Provides a decorator for memoizing functions"""
     from functools import wraps
+
     memo = {}
 
     @wraps(function)
@@ -54,6 +56,7 @@ def memoize(function):
             rv = function(*args)
             memo[args] = rv
             return rv
+
     return wrapper
 
 
@@ -87,19 +90,25 @@ def interpolate(y, new_length):
     return z
 
 
-r_filt = dsp.ExpFilter(np.tile(0.01, config.N_PIXELS // 2),
-                       alpha_decay=0.2, alpha_rise=0.99)
-g_filt = dsp.ExpFilter(np.tile(0.01, config.N_PIXELS // 2),
-                       alpha_decay=0.05, alpha_rise=0.3)
-b_filt = dsp.ExpFilter(np.tile(0.01, config.N_PIXELS // 2),
-                       alpha_decay=0.1, alpha_rise=0.5)
-common_mode = dsp.ExpFilter(np.tile(0.01, config.N_PIXELS // 2),
-                       alpha_decay=0.99, alpha_rise=0.01)
-p_filt = dsp.ExpFilter(np.tile(1, (3, config.N_PIXELS // 2)),
-                       alpha_decay=0.1, alpha_rise=0.99)
+r_filt = dsp.ExpFilter(
+    np.tile(0.01, config.N_PIXELS // 2), alpha_decay=0.2, alpha_rise=0.99
+)
+g_filt = dsp.ExpFilter(
+    np.tile(0.01, config.N_PIXELS // 2), alpha_decay=0.05, alpha_rise=0.3
+)
+b_filt = dsp.ExpFilter(
+    np.tile(0.01, config.N_PIXELS // 2), alpha_decay=0.1, alpha_rise=0.5
+)
+common_mode = dsp.ExpFilter(
+    np.tile(0.01, config.N_PIXELS // 2), alpha_decay=0.99, alpha_rise=0.01
+)
+p_filt = dsp.ExpFilter(
+    np.tile(1, (3, config.N_PIXELS // 2)), alpha_decay=0.1, alpha_rise=0.99
+)
 p = np.tile(1.0, (3, config.N_PIXELS // 2))
-gain = dsp.ExpFilter(np.tile(0.01, config.N_FFT_BINS),
-                     alpha_decay=0.001, alpha_rise=0.99)
+gain = dsp.ExpFilter(
+    np.tile(0.01, config.N_FFT_BINS), alpha_decay=0.001, alpha_rise=0.99
+)
 
 
 def visualize_scroll(y):
@@ -109,9 +118,9 @@ def visualize_scroll(y):
     gain.update(y)
     y /= gain.value
     y *= 255.0
-    r = int(np.max(y[:len(y) // 3]))
-    g = int(np.max(y[len(y) // 3: 2 * len(y) // 3]))
-    b = int(np.max(y[2 * len(y) // 3:]))
+    r = int(np.max(y[: len(y) // 3]))
+    g = int(np.max(y[len(y) // 3 : 2 * len(y) // 3]))
+    b = int(np.max(y[2 * len(y) // 3 :]))
     # Scrolling effect window
     p[:, 1:] = p[:, :-1]
     p *= 0.98
@@ -134,9 +143,9 @@ def visualize_energy(y):
     y *= float((config.N_PIXELS // 2) - 1)
     # Map color channels according to energy in the different freq bands
     scale = 0.9
-    r = int(np.mean(y[:len(y) // 3]**scale))
-    g = int(np.mean(y[len(y) // 3: 2 * len(y) // 3]**scale))
-    b = int(np.mean(y[2 * len(y) // 3:]**scale))
+    r = int(np.mean(y[: len(y) // 3] ** scale))
+    g = int(np.mean(y[len(y) // 3 : 2 * len(y) // 3] ** scale))
+    b = int(np.mean(y[2 * len(y) // 3 :] ** scale))
     # Assign color to different frequency regions
     p[0, :r] = 255.0
     p[0, r:] = 0.0
@@ -172,18 +181,20 @@ def visualize_spectrum(y):
     r = np.concatenate((r[::-1], r))
     g = np.concatenate((g[::-1], g))
     b = np.concatenate((b[::-1], b))
-    output = np.array([r, g,b]) * 255
+    output = np.array([r, g, b]) * 255
     return output
 
 
-fft_plot_filter = dsp.ExpFilter(np.tile(1e-1, config.N_FFT_BINS),
-                         alpha_decay=0.5, alpha_rise=0.99)
-mel_gain = dsp.ExpFilter(np.tile(1e-1, config.N_FFT_BINS),
-                         alpha_decay=0.01, alpha_rise=0.99)
-mel_smoothing = dsp.ExpFilter(np.tile(1e-1, config.N_FFT_BINS),
-                         alpha_decay=0.5, alpha_rise=0.99)
-volume = dsp.ExpFilter(config.MIN_VOLUME_THRESHOLD,
-                       alpha_decay=0.02, alpha_rise=0.02)
+fft_plot_filter = dsp.ExpFilter(
+    np.tile(1e-1, config.N_FFT_BINS), alpha_decay=0.5, alpha_rise=0.99
+)
+mel_gain = dsp.ExpFilter(
+    np.tile(1e-1, config.N_FFT_BINS), alpha_decay=0.01, alpha_rise=0.99
+)
+mel_smoothing = dsp.ExpFilter(
+    np.tile(1e-1, config.N_FFT_BINS), alpha_decay=0.5, alpha_rise=0.99
+)
+volume = dsp.ExpFilter(config.MIN_VOLUME_THRESHOLD, alpha_decay=0.02, alpha_rise=0.02)
 fft_window = np.hamming(int(config.MIC_RATE / config.FPS) * config.N_ROLLING_HISTORY)
 prev_fps_update = time.time()
 
@@ -196,20 +207,20 @@ def microphone_update(audio_samples):
     y_roll[:-1] = y_roll[1:]
     y_roll[-1, :] = np.copy(y)
     y_data = np.concatenate(y_roll, axis=0).astype(np.float32)
-    
+
     vol = np.max(np.abs(y_data))
     if vol < config.MIN_VOLUME_THRESHOLD:
-        print('No audio input. Volume below threshold. Volume:', vol)
+        print("No audio input. Volume below threshold. Volume:", vol)
         led.pixels = np.tile(0, (3, config.N_PIXELS))
         led.update()
     else:
         # Transform audio input into the frequency domain
         N = len(y_data)
-        N_zeros = 2**int(np.ceil(np.log2(N))) - N
+        N_zeros = 2 ** int(np.ceil(np.log2(N))) - N
         # Pad with zeros until the next power of two
         y_data *= fft_window
-        y_padded = np.pad(y_data, (0, N_zeros), mode='constant')
-        YS = np.abs(np.fft.rfft(y_padded)[:N // 2])
+        y_padded = np.pad(y_data, (0, N_zeros), mode="constant")
+        YS = np.abs(np.fft.rfft(y_padded)[: N // 2])
         # Construct a Mel filterbank from the FFT data
         mel = np.atleast_2d(YS).T * dsp.mel_y.T
         # Scale data to values more suitable for visualization
@@ -234,12 +245,12 @@ def microphone_update(audio_samples):
             b_curve.setData(y=led.pixels[2])
     if config.USE_GUI:
         app.processEvents()
-    
+
     if config.DISPLAY_FPS:
         fps = frames_per_second()
         if time.time() - 0.5 > prev_fps_update:
             prev_fps_update = time.time()
-            print('FPS {:.0f} / {:.0f}'.format(fps, config.FPS))
+            print("FPS {:.0f} / {:.0f}".format(fps, config.FPS))
 
 
 # Number of audio samples to read every time frame
@@ -252,29 +263,30 @@ visualization_effect = visualize_spectrum
 """Visualization effect to display on the LED strip"""
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     if config.USE_GUI:
         import pyqtgraph as pg
-        from pyqtgraph.Qt import QtGui, QtCore
+        from pyqtgraph.Qt import QtGui, QtWidgets
+
         # Create GUI window
-        app = QtGui.QApplication([])
+        app = QtWidgets.QApplication([])
         view = pg.GraphicsView()
-        layout = pg.GraphicsLayout(border=(100,100,100))
+        layout = pg.GraphicsLayout(border=(100, 100, 100))
         view.setCentralItem(layout)
         view.show()
-        view.setWindowTitle('Visualization')
-        view.resize(800,600)
+        view.setWindowTitle("Visualization")
+        view.resize(800, 600)
         # Mel filterbank plot
-        fft_plot = layout.addPlot(title='Filterbank Output', colspan=3)
+        fft_plot = layout.addPlot(title="Filterbank Output", colspan=3)
         fft_plot.setRange(yRange=[-0.1, 1.2])
         fft_plot.disableAutoRange(axis=pg.ViewBox.YAxis)
         x_data = np.array(range(1, config.N_FFT_BINS + 1))
         mel_curve = pg.PlotCurveItem()
-        mel_curve.setData(x=x_data, y=x_data*0)
+        mel_curve.setData(x=x_data, y=x_data * 0)
         fft_plot.addItem(mel_curve)
         # Visualization plot
         layout.nextRow()
-        led_plot = layout.addPlot(title='Visualization Output', colspan=3)
+        led_plot = layout.addPlot(title="Visualization Output", colspan=3)
         led_plot.setRange(yRange=[-5, 260])
         led_plot.disableAutoRange(axis=pg.ViewBox.YAxis)
         # Pen for each of the color channel curves
@@ -287,56 +299,64 @@ if __name__ == '__main__':
         b_curve = pg.PlotCurveItem(pen=b_pen)
         # Define x data
         x_data = np.array(range(1, config.N_PIXELS + 1))
-        r_curve.setData(x=x_data, y=x_data*0)
-        g_curve.setData(x=x_data, y=x_data*0)
-        b_curve.setData(x=x_data, y=x_data*0)
+        r_curve.setData(x=x_data, y=x_data * 0)
+        g_curve.setData(x=x_data, y=x_data * 0)
+        b_curve.setData(x=x_data, y=x_data * 0)
         # Add curves to plot
         led_plot.addItem(r_curve)
         led_plot.addItem(g_curve)
         led_plot.addItem(b_curve)
         # Frequency range label
-        freq_label = pg.LabelItem('')
+        freq_label = pg.LabelItem("")
+
         # Frequency slider
         def freq_slider_change(tick):
-            minf = freq_slider.tickValue(0)**2.0 * (config.MIC_RATE / 2.0)
-            maxf = freq_slider.tickValue(1)**2.0 * (config.MIC_RATE / 2.0)
-            t = 'Frequency range: {:.0f} - {:.0f} Hz'.format(minf, maxf)
+            minf = freq_slider.tickValue(0) ** 2.0 * (config.MIC_RATE / 2.0)
+            maxf = freq_slider.tickValue(1) ** 2.0 * (config.MIC_RATE / 2.0)
+            t = "Frequency range: {:.0f} - {:.0f} Hz".format(minf, maxf)
             freq_label.setText(t)
             config.MIN_FREQUENCY = minf
             config.MAX_FREQUENCY = maxf
             dsp.create_mel_bank()
-        freq_slider = pg.TickSliderItem(orientation='bottom', allowAdd=False)
+
+        freq_slider = pg.TickSliderItem(orientation="bottom", allowAdd=False)
         freq_slider.tickMoveFinished = freq_slider_change
-        freq_slider.addTick((config.MIN_FREQUENCY / (config.MIC_RATE / 2.0))**0.5)
-        freq_slider.addTick((config.MAX_FREQUENCY / (config.MIC_RATE / 2.0))**0.5)
-        freq_label.setText('Frequency range: {} - {} Hz'.format(
-            config.MIN_FREQUENCY,
-            config.MAX_FREQUENCY))
+        freq_slider.addTick((config.MIN_FREQUENCY / (config.MIC_RATE / 2.0)) ** 0.5)
+        freq_slider.addTick((config.MAX_FREQUENCY / (config.MIC_RATE / 2.0)) ** 0.5)
+        freq_label.setText(
+            "Frequency range: {} - {} Hz".format(
+                config.MIN_FREQUENCY, config.MAX_FREQUENCY
+            )
+        )
         # Effect selection
-        active_color = '#16dbeb'
-        inactive_color = '#FFFFFF'
+        active_color = "#16dbeb"
+        inactive_color = "#FFFFFF"
+
         def energy_click(x):
             global visualization_effect
             visualization_effect = visualize_energy
-            energy_label.setText('Energy', color=active_color)
-            scroll_label.setText('Scroll', color=inactive_color)
-            spectrum_label.setText('Spectrum', color=inactive_color)
+            energy_label.setText("Energy", color=active_color)
+            scroll_label.setText("Scroll", color=inactive_color)
+            spectrum_label.setText("Spectrum", color=inactive_color)
+
         def scroll_click(x):
             global visualization_effect
             visualization_effect = visualize_scroll
-            energy_label.setText('Energy', color=inactive_color)
-            scroll_label.setText('Scroll', color=active_color)
-            spectrum_label.setText('Spectrum', color=inactive_color)
+            energy_label.setText("Energy", color=inactive_color)
+            scroll_label.setText("Scroll", color=active_color)
+            spectrum_label.setText("Spectrum", color=inactive_color)
+
         def spectrum_click(x):
             global visualization_effect
             visualization_effect = visualize_spectrum
-            energy_label.setText('Energy', color=inactive_color)
-            scroll_label.setText('Scroll', color=inactive_color)
-            spectrum_label.setText('Spectrum', color=active_color)
+            energy_label.setText("Energy", color=inactive_color)
+            scroll_label.setText("Scroll", color=inactive_color)
+            spectrum_label.setText("Spectrum", color=active_color)
+
         # Create effect "buttons" (labels with click event)
-        energy_label = pg.LabelItem('Energy')
-        scroll_label = pg.LabelItem('Scroll')
-        spectrum_label = pg.LabelItem('Spectrum')
+        energy_label = pg.LabelItem("Energy")
+        scroll_label = pg.LabelItem("Scroll")
+        spectrum_label = pg.LabelItem("Spectrum")
         energy_label.mousePressEvent = energy_click
         scroll_label.mousePressEvent = scroll_click
         spectrum_label.mousePressEvent = spectrum_click
