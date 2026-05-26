@@ -1,7 +1,6 @@
 #include "DSP.h"
 #include <cmath>
 #include <algorithm>
-#include <numeric>
 #include <cstring>
 #include <stdexcept>
 

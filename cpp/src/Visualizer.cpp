@@ -135,11 +135,39 @@ void Visualizer::doSpectrum(const float* mel, PixelFrame& out) {
     // B = smoothed raw mel energy.
     b_filt_.update(y, HALF);
 
-    // Write mirrored output directly — spectrum doesn't use p_.
+    // ── Hue rotation ──────────────────────────────────────────────────────────
+    // Sum mel bins (normalised by N so the metric stays in [0,1]).
+    // Feed through an ExpFilter for inertia, then accumulate into an angle.
+    // Result: the colour palette rotates faster during loud/energetic passages
+    // and coasts slowly in quieter moments.
+    float energy_sum = 0.0f;
+    for (int i = 0; i < N; ++i) energy_sum += mel[i];
+    hue_energy_.update(energy_sum / N);
+
+    // 0.05 rad/frame at peak energy ≈ one full rotation every ~2 s at 60 FPS.
+    hue_angle_ = std::fmod(hue_angle_ + hue_energy_.value * 0.05f,
+                           2.0f * static_cast<float>(M_PI));
+
+    // Hue rotation matrix: rotates around the (1,1,1) luminance axis (Rodrigues).
+    // At θ=0 → identity; at θ=2π/3 → R→G→B→R cyclic permutation.
+    const float c  = std::cos(hue_angle_);
+    const float s  = std::sin(hue_angle_);
+    const float k  = (1.0f - c) / 3.0f;
+    const float sq = s / std::sqrt(3.0f);
+    //          [ c+k    k-sq   k+sq ]
+    //  R(θ) =  [ k+sq   c+k    k-sq ]
+    //          [ k-sq   k+sq   c+k  ]
+
+    // Apply rotation and write mirrored output — spectrum doesn't use p_.
     for (int i = 0; i < HALF; ++i) {
-        uint8_t rv = clamp255(r_filt_.value[i]   * 255.0f);
-        uint8_t gv = clamp255(std::abs(diff[i])  * 255.0f);
-        uint8_t bv = clamp255(b_filt_.value[i]   * 255.0f);
+        float r = r_filt_.value[i];
+        float g = std::abs(diff[i]);
+        float b = b_filt_.value[i];
+
+        uint8_t rv = clamp255(((c+k)*r + (k-sq)*g + (k+sq)*b) * 255.0f);
+        uint8_t gv = clamp255(((k+sq)*r + (c+k)*g + (k-sq)*b) * 255.0f);
+        uint8_t bv = clamp255(((k-sq)*r + (k+sq)*g + (c+k)*b) * 255.0f);
+
         out[0][HALF-1-i] = rv;  out[0][HALF+i] = rv;
         out[1][HALF-1-i] = gv;  out[1][HALF+i] = gv;
         out[2][HALF-1-i] = bv;  out[2][HALF+i] = bv;

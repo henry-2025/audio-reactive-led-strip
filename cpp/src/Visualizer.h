@@ -19,6 +19,7 @@ public:
     void process(const float* mel, PixelFrame& out);
     void setEffect(Effect e) { effect_ = e; }
     Effect effect() const { return effect_; }
+    float hueAngle() const { return hue_angle_; }
 
 private:
     static constexpr int HALF = Config::N_PIXELS / 2; // 67
@@ -41,6 +42,11 @@ private:
     ExpFilterArray b_filt_      {HALF, 0.01f, 0.1f,  0.5f};
     ExpFilterArray common_mode_ {HALF, 0.01f, 0.99f, 0.01f};
     float prev_spectrum_[HALF]{};
+
+    // Spectrum hue rotation: filtered total mel energy drives the rotation rate.
+    // The angle accumulates over time, cycling colours as the music plays.
+    ExpFilter hue_energy_{0.0f, 0.3f, 0.95f};
+    float     hue_angle_ = 0.0f;
 
     void doScroll  (const float* mel);
     void doEnergy  (const float* mel);

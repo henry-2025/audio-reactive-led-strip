@@ -2,7 +2,6 @@
 #include "Config.h"
 #include "ExpFilter.h"
 #include "MelFilterbank.h"
-#include <array>
 #include <fftw3.h>
 
 // Applies a 1-D Gaussian blur (scipy.ndimage.gaussian_filter1d equivalent).

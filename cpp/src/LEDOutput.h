@@ -1,5 +1,4 @@
 #pragma once
-#include "Config.h"
 #include "Visualizer.h"   // PixelFrame
 #include <cstdint>
 #include <string>

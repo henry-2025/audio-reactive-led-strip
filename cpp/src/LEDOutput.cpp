@@ -2,7 +2,6 @@
 #include <stdexcept>
 #include <cstring>
 #include <fstream>
-#include <algorithm>
 
 // POSIX serial
 #include <fcntl.h>
