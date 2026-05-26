@@ -43,6 +43,9 @@ private:
     // Which handle is being dragged (set once at drag start).
     bool drag_lo_ = false;
 
+    // LED output plot mode.
+    bool show_rgb_strip_ = false;
+
     // Display-only smoothing for the mel plot (matches Python fft_plot_filter).
     ExpFilterArray fft_plot_filter_{Config::N_FFT_BINS, 0.1f, 0.5f, 0.99f};
 

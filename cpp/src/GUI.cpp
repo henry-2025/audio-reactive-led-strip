@@ -220,21 +220,47 @@ bool GUI::draw(const float* mel, Visualizer& viz, const PixelFrame& pixels, floa
 
     // ── LED pixel plot ────────────────────────────────────────────────────────
 
-    float px_x[NP], px_r[NP], px_g[NP], px_b[NP];
-    for (int i = 0; i < NP; ++i) {
-        px_x[i] = static_cast<float>(i);
-        px_r[i] = static_cast<float>(pixels[0][i]);
-        px_g[i] = static_cast<float>(pixels[1][i]);
-        px_b[i] = static_cast<float>(pixels[2][i]);
-    }
+    if (show_rgb_strip_) {
+        // RGB strip view: each pixel drawn as a solid rectangle in its true colour.
+        // The strip height is intentionally shorter than the channel-lines plot.
+        float strip_h = std::max(60.0f, plot_h * 0.45f);
+        if (ImPlot::BeginPlot("LED Output", {-1, strip_h},
+                              ImPlotFlags_NoLegend | ImPlotFlags_NoMenus)) {
+            ImPlot::SetupAxes(nullptr, nullptr,
+                              ImPlotAxisFlags_NoDecorations | ImPlotAxisFlags_Lock,
+                              ImPlotAxisFlags_NoDecorations | ImPlotAxisFlags_Lock);
+            ImPlot::SetupAxisLimits(ImAxis_X1, -0.5, NP - 0.5, ImGuiCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_Y1,  0.0,       1.0, ImGuiCond_Always);
 
-    if (ImPlot::BeginPlot("LED Output", {-1, plot_h})) {
-        ImPlot::SetupAxes("Pixel", nullptr);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, -5, 265, ImGuiCond_Always);
-        ImPlot::SetNextLineStyle(kRed,   2.0f); ImPlot::PlotLine("R", px_x, px_r, NP);
-        ImPlot::SetNextLineStyle(kGreen, 2.0f); ImPlot::PlotLine("G", px_x, px_g, NP);
-        ImPlot::SetNextLineStyle(kBlue,  2.0f); ImPlot::PlotLine("B", px_x, px_b, NP);
-        ImPlot::EndPlot();
+            ImDrawList* dl = ImPlot::GetPlotDrawList();
+            ImPlot::PushPlotClipRect();
+            for (int i = 0; i < NP; ++i) {
+                // PlotToPixels: y=1 → top of plot (small screen-Y), y=0 → bottom
+                ImVec2 tl = ImPlot::PlotToPixels(i - 0.5, 1.0);
+                ImVec2 br = ImPlot::PlotToPixels(i + 0.5, 0.0);
+                dl->AddRectFilled(tl, br,
+                    IM_COL32(pixels[0][i], pixels[1][i], pixels[2][i], 255));
+            }
+            ImPlot::PopPlotClipRect();
+            ImPlot::EndPlot();
+        }
+    } else {
+        // Channel-lines view: separate R, G, B curves.
+        float px_x[NP], px_r[NP], px_g[NP], px_b[NP];
+        for (int i = 0; i < NP; ++i) {
+            px_x[i] = static_cast<float>(i);
+            px_r[i] = static_cast<float>(pixels[0][i]);
+            px_g[i] = static_cast<float>(pixels[1][i]);
+            px_b[i] = static_cast<float>(pixels[2][i]);
+        }
+        if (ImPlot::BeginPlot("LED Output", {-1, plot_h})) {
+            ImPlot::SetupAxes("Pixel", nullptr);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, -5, 265, ImGuiCond_Always);
+            ImPlot::SetNextLineStyle(kRed,   2.0f); ImPlot::PlotLine("R", px_x, px_r, NP);
+            ImPlot::SetNextLineStyle(kGreen, 2.0f); ImPlot::PlotLine("G", px_x, px_g, NP);
+            ImPlot::SetNextLineStyle(kBlue,  2.0f); ImPlot::PlotLine("B", px_x, px_b, NP);
+            ImPlot::EndPlot();
+        }
     }
 
     // ── Controls ──────────────────────────────────────────────────────────────
@@ -258,6 +284,15 @@ bool GUI::draw(const float* mel, Visualizer& viz, const PixelFrame& pixels, floa
     effectBtn("Energy",   Visualizer::Effect::Energy);
     effectBtn("Scroll",   Visualizer::Effect::Scroll);
     effectBtn("Spectrum", Visualizer::Effect::Spectrum);
+
+    // LED view toggle — separated visually from effect buttons
+    ImGui::SameLine(0.0f, 24.0f);
+    ImGui::TextDisabled("|");
+    ImGui::SameLine(0.0f, 24.0f);
+    bool strip_active = show_rgb_strip_;
+    if (strip_active) ImGui::PushStyleColor(ImGuiCol_Button, kCyan);
+    if (ImGui::Button("RGB Strip", {90, 0})) show_rgb_strip_ = !show_rgb_strip_;
+    if (strip_active) ImGui::PopStyleColor();
 
     ImGui::End();
     return freq_changed;
