@@ -4,7 +4,7 @@
  * Receives RGB frames over USB CDC serial from the Python DSP host and drives
  * a WS2812B strip via FastLED (uses PIO, so no interrupt conflicts with USB).
  *
- * Board: Raspberry Pi Pico (Earle Philhower arduino-pico core)
+ * Board: Raspberry Pi Pico (arduino:mbed_rp2040 core)
  * Library: FastLED >= 3.6
  *
  * Protocol (matches _update_pico() in led.py):
@@ -30,7 +30,7 @@ static uint32_t secondTimer = 0;
 #endif
 
 void setup() {
-    Serial.begin();  // USB CDC — baud rate argument is ignored on Pico
+    Serial.begin(115200);  // USB CDC — baud rate is ignored but mbed core requires an argument
     FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
     FastLED.clear();
     FastLED.show();
@@ -65,7 +65,9 @@ void loop() {
     fpsCounter++;
     if (millis() - secondTimer >= 1000U) {
         secondTimer = millis();
-        Serial.printf("FPS: %d\n", fpsCounter);
+        char buf[16];
+        snprintf(buf, sizeof(buf), "FPS: %d\n", fpsCounter);
+        Serial.print(buf);
         fpsCounter = 0;
     }
 #endif

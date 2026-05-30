@@ -144,9 +144,12 @@ void Visualizer::doSpectrum(const float* mel, PixelFrame& out) {
     for (int i = 0; i < N; ++i) energy_sum += mel[i];
     hue_energy_.update(energy_sum / N);
 
-    // 0.05 rad/frame at peak energy ≈ one full rotation every ~2 s at 60 FPS.
-    hue_angle_ = std::fmod(hue_angle_ + hue_energy_.value * 0.05f,
-                           2.0f * static_cast<float>(M_PI));
+    // Map filtered energy directly to a rotation angle in [0, MAX_ANGLE].
+    // High energy → maximum colour rotation; silence → identity (no rotation).
+    // 2π/3 (120°) is the natural unit for RGB: at max it gives a full
+    // R→G→B→R channel permutation.
+    constexpr float MAX_ANGLE = 2.0f * static_cast<float>(M_PI);
+    hue_angle_ = std::clamp(hue_energy_.value, 0.0f, 1.0f) * MAX_ANGLE;
 
     // Hue rotation matrix: rotates around the (1,1,1) luminance axis (Rodrigues).
     // At θ=0 → identity; at θ=2π/3 → R→G→B→R cyclic permutation.

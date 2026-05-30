@@ -18,7 +18,7 @@
 
 static std::unique_ptr<LEDOutput> makeLEDOutput(int argc, char** argv) {
     if (argc >= 2 && std::strcmp(argv[1], "pico") == 0) {
-        std::string port = (argc >= 3) ? argv[2] : "/dev/tty.usbmodem1101";
+        std::string port = (argc >= 3) ? argv[2] : "/dev/cu.usbmodem1101";
         std::printf("LED: Pico on %s\n", port.c_str());
         return std::make_unique<PicoOutput>(port);
     }
@@ -67,6 +67,8 @@ int main(int argc, char** argv) {
         float dt    = std::chrono::duration<float>(t_now - t_prev).count();
         t_prev = t_now;
         if (dt > 0.0f) fps = fps * 0.95f + (1.0f / dt) * 0.05f;
+        std::printf("\rFPS: %5.1f  hue: %6.3f rad", fps, viz.hueAngle());
+        std::fflush(stdout);
 
         // ── GUI ───────────────────────────────────────────────────────────────
         gui.beginFrame();

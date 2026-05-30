@@ -45,7 +45,7 @@ private:
 
     // Spectrum hue rotation: filtered total mel energy drives the rotation rate.
     // The angle accumulates over time, cycling colours as the music plays.
-    ExpFilter hue_energy_{0.0f, 0.3f, 0.95f};
+    ExpFilter hue_energy_{0.0f, 0.01f, 0.98f};
     float     hue_angle_ = 0.0f;
 
     void doScroll  (const float* mel);

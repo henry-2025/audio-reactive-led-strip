@@ -60,7 +60,7 @@ static speed_t baudToSpeed(int baud) {
 }
 
 PicoOutput::PicoOutput(const std::string& port, int baud_rate) {
-    fd_ = open(port.c_str(), O_RDWR | O_NOCTTY | O_SYNC);
+    fd_ = open(port.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd_ < 0)
         throw std::runtime_error("PicoOutput: cannot open " + port);
 
