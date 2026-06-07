@@ -284,6 +284,7 @@ bool GUI::draw(const float* mel, Visualizer& viz, const PixelFrame& pixels, floa
     effectBtn("Energy",   Visualizer::Effect::Energy);
     effectBtn("Scroll",   Visualizer::Effect::Scroll);
     effectBtn("Spectrum", Visualizer::Effect::Spectrum);
+    effectBtn("Strobe",   Visualizer::Effect::Strobe);
 
     // LED view toggle — separated visually from effect buttons
     ImGui::SameLine(0.0f, 24.0f);
