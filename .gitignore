@@ -47,3 +47,9 @@ Temporary Items
 .apdisk
 *.pyc
 *.pdf
+
+# C++ build artifacts
+cpp/build/
+cpp/.cache/
+cpp/**/*.o
+cpp/**/*.a
