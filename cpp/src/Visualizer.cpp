@@ -42,6 +42,7 @@ void Visualizer::process(const float* mel, PixelFrame& out) {
         case Effect::Scroll:   doScroll(mel);         mirrorOut(out); break;
         case Effect::Energy:   doEnergy(mel);         mirrorOut(out); break;
         case Effect::Spectrum: doSpectrum(mel, out);                  break;
+        case Effect::Strobe:   doStrobe(mel);         mirrorOut(out); break;
     }
 }
 
@@ -175,4 +176,37 @@ void Visualizer::doSpectrum(const float* mel, PixelFrame& out) {
         out[1][HALF-1-i] = gv;  out[1][HALF+i] = gv;
         out[2][HALF-1-i] = bv;  out[2][HALF+i] = bv;
     }
+}
+
+// ── Strobe ────────────────────────────────────────────────────────────────────
+
+void Visualizer::doStrobe(const float* mel) {
+    // Trigger threshold: envelope must exceed this to fire a flash.
+    // Rearm threshold: decay must fall below this before the next flash can trigger.
+    constexpr float STROBE_THRESHOLD = 0.3f;
+    constexpr float STROBE_REARM     = 20.0f;  // brightness units (0-255)
+    // Per-frame multiplicative decay applied while in the decay state.
+    // ~0.85 at 60 fps gives roughly a 100 ms tail.
+    constexpr float DECAY_RATE       = 0.85f;
+
+    // Always update the envelope so it tracks music even while decaying.
+    float energy = 0.0f;
+    for (int i = 0; i < N; ++i) energy += mel[i];
+    strobe_env_.update(energy / N);
+
+    if (strobe_decaying_) {
+        // Independent exponential decay — ignores FFT energy until rearmed.
+        strobe_brightness_ *= DECAY_RATE;
+        if (strobe_brightness_ < STROBE_REARM)
+            strobe_decaying_ = false;
+    } else if (strobe_env_.value >= STROBE_THRESHOLD) {
+        // New flash: snap to full brightness and enter decay state.
+        strobe_brightness_ = 255.0f;
+        strobe_decaying_   = true;
+    }
+    // else: rearmed but below threshold — strip stays dark.
+
+    std::fill(p_,          p_ + HALF,   strobe_brightness_);
+    std::fill(p_ + HALF,   p_ + 2*HALF, strobe_brightness_);
+    std::fill(p_ + 2*HALF, p_ + 3*HALF, strobe_brightness_);
 }

@@ -12,7 +12,7 @@ using PixelFrame = std::array<std::array<uint8_t, Config::N_PIXELS>, 3>;
 // Call process() once per audio frame with the N_FFT_BINS mel values from DSPPipeline.
 class Visualizer {
 public:
-    enum class Effect { Scroll, Energy, Spectrum };
+    enum class Effect { Scroll, Energy, Spectrum, Strobe };
 
     Visualizer();
 
@@ -48,9 +48,17 @@ private:
     ExpFilter hue_energy_{0.0f, 0.01f, 0.98f};
     float     hue_angle_ = 0.0f;
 
+    // Strobe: fast-rise / slow-fall envelope of cumulative mel energy.
+    ExpFilter strobe_env_{0.0f, 0.11f, 0.99f};
+    // Independent decay brightness — only active while in the DECAY state.
+    // A new flash cannot trigger until this drops back below STROBE_REARM.
+    float strobe_brightness_ = 0.0f;
+    bool  strobe_decaying_   = false;
+
     void doScroll  (const float* mel);
     void doEnergy  (const float* mel);
     void doSpectrum(const float* mel, PixelFrame& out);
+    void doStrobe  (const float* mel);
 
     // Mirror p_ into the full-strip output: [p reversed | p].
     void mirrorOut(PixelFrame& out) const;
